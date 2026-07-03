@@ -492,7 +492,95 @@ router.post('/exams/:id/questions', async (req, res) => {
   }
 });
 
-// Upload questions from PDF or Word
+// Helper to scan text and parse MCQ questions, options, and correct answers
+function parseQuestionsFromText(text) {
+  const lines = text.replace(/\r\n/g, '\n').split('\n').map(l => l.trim());
+  const parsedQuestions = [];
+  let currentQuestion = null;
+
+  const isValidQuestion = (q) => {
+    return q && q.question_text && q.option_a && q.option_b && q.option_c && q.option_d && q.correct_option;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line) continue;
+
+    // Check if line starts a question (e.g. "1. What is..." or "Q1. What is..." or "5) What is...")
+    const qMatch = line.match(/^(?:Q|q)?\s*(\d+)[\.\)]\s*(.*)$/);
+    if (qMatch) {
+      if (isValidQuestion(currentQuestion)) {
+        parsedQuestions.push(currentQuestion);
+      }
+      currentQuestion = {
+        question_text: qMatch[2].trim(),
+        option_a: '',
+        option_b: '',
+        option_c: '',
+        option_d: '',
+        correct_option: '',
+        question_type: 'MCQ',
+        marks: 1
+      };
+      continue;
+    }
+
+    if (!currentQuestion) continue;
+
+    // Check if inline options (e.g. a) option1 b) option2 c) option3 d) option4)
+    const inlineOptMatch = line.match(/^[aA][\.\)]\s*(.*?)\s*[bB][\.\)]\s*(.*?)\s*[cC][\.\)]\s*(.*?)\s*[dD][\.\)]\s*(.*)$/);
+    if (inlineOptMatch) {
+      currentQuestion.option_a = inlineOptMatch[1].trim();
+      currentQuestion.option_b = inlineOptMatch[2].trim();
+      currentQuestion.option_c = inlineOptMatch[3].trim();
+      currentQuestion.option_d = inlineOptMatch[4].trim();
+      continue;
+    }
+
+    // Check individual options
+    const optAMatch = line.match(/^[aA][\.\)]\s*(.*)$/);
+    if (optAMatch) {
+      currentQuestion.option_a = optAMatch[1].trim();
+      continue;
+    }
+    const optBMatch = line.match(/^[bB][\.\)]\s*(.*)$/);
+    if (optBMatch) {
+      currentQuestion.option_b = optBMatch[1].trim();
+      continue;
+    }
+    const optCMatch = line.match(/^[cC][\.\)]\s*(.*)$/);
+    if (optCMatch) {
+      currentQuestion.option_c = optCMatch[1].trim();
+      continue;
+    }
+    const optDMatch = line.match(/^[dD][\.\)]\s*(.*)$/);
+    if (optDMatch) {
+      currentQuestion.option_d = optDMatch[1].trim();
+      continue;
+    }
+
+    // Check answer line (e.g. "Answer: A" or "Ans - B" or "Correct Option: C")
+    const ansMatch = line.match(/^(?:Answer|Ans|Correct Answer|Correct Option|Correct)\s*[\-:\s]\s*([a-dA-D])/i);
+    if (ansMatch) {
+      currentQuestion.correct_option = ansMatch[1].toUpperCase().trim();
+      continue;
+    }
+
+    // If it's a multi-line question text, append to question_text
+    if (!currentQuestion.option_a && !currentQuestion.option_b && !currentQuestion.option_c && !currentQuestion.option_d && !currentQuestion.correct_option) {
+      currentQuestion.question_text += '\n' + line;
+    }
+  }
+
+  // Push final question if valid
+  if (isValidQuestion(currentQuestion)) {
+    parsedQuestions.push(currentQuestion);
+  }
+
+  return parsedQuestions;
+}
+
+// Upload questions from PDF or Word & insert directly to DB
 router.post('/exams/:id/upload-questions', upload.single('file'), async (req, res) => {
   try {
     const examId = req.params.id;
@@ -519,21 +607,49 @@ router.post('/exams/:id/upload-questions', upload.single('file'), async (req, re
       const result = await mammoth.extractRawText({ path: req.file.path });
       text = result.value;
     } else if (ext === '.doc') {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
       return res.status(400).json({ success: false, message: 'Only .docx files supported for Word. Please save as .docx' });
     } else if (ext === '.txt') {
       text = fs.readFileSync(req.file.path, 'utf-8');
     } else {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
       return res.status(400).json({ success: false, message: 'Unsupported file type. Use PDF, DOCX, or TXT' });
     }
 
     // Clean up uploaded file
-    fs.unlinkSync(req.file.path);
+    if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
 
-    // Return extracted text for admin to review
+    // Parse questions from extracted text
+    const parsedQuestions = parseQuestionsFromText(text);
+
+    if (parsedQuestions.length === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Could not parse any valid questions. Please verify file format (e.g. "1. Question text\\n a) option A\\n b) option B\\n c) option C\\n d) option D\\n Answer: A")' 
+      });
+    }
+
+    // Insert questions to DB
+    const insertedQuestions = [];
+    for (const q of parsedQuestions) {
+      const question = await Question.create({
+        exam_id: examId,
+        question_type: 'MCQ',
+        question_text: q.question_text,
+        option_a: q.option_a,
+        option_b: q.option_b,
+        option_c: q.option_c,
+        option_d: q.option_d,
+        correct_option: q.correct_option,
+        marks: q.marks || 1
+      });
+      insertedQuestions.push(question);
+    }
+
     res.json({
       success: true,
-      message: 'Text extracted from file. Review and add questions manually.',
-      extracted_text: text.trim()
+      message: `Successfully parsed and imported ${insertedQuestions.length} questions directly into the exam!`,
+      count: insertedQuestions.length
     });
   } catch (error) {
     console.error('Upload questions error:', error);
