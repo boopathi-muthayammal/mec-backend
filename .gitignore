@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Environment variables (contains sensitive DB credentials)
+.env
+.env.local
+.env.*.local
+
+# SQLite backup
+*.db
+*.db.bak
+
+# Uploaded files
+uploads/*
+!uploads/.gitkeep
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS Files
+.DS_Store
+Thumbs.db

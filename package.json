@@ -1,0 +1,22 @@
+{
+  "name": "online-exam-portal",
+  "version": "2.0.0",
+  "description": "Online Exam Portal with Anti-Cheating - MCQ & Programming",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "csv-parse": "^5.5.3",
+    "dotenv": "^17.4.2",
+    "express": "^4.18.2",
+    "express-session": "^1.17.3",
+    "mammoth": "^1.6.0",
+    "mongoose": "^9.7.3",
+    "multer": "^1.4.5-lts.1",
+    "pdf-parse": "^1.1.1",
+    "sql.js": "^1.10.3"
+  }
+}
