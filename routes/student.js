@@ -1,5 +1,8 @@
 const express = require('express');
 const mongoose = require('mongoose');
+const fs = require('fs');
+const path = require('path');
+const { spawn, exec } = require('child_process');
 const { Exam, Question, Result, Answer } = require('../database');
 
 const router = express.Router();
@@ -16,9 +19,19 @@ router.use(studentAuth);
 router.get('/exams', async (req, res) => {
   try {
     const studentId = req.session.student.id;
+    const studentYear = parseInt(req.session.student.year || '0');
+    const studentSection = (req.session.student.section || '').trim().toUpperCase();
 
     const exams = await Exam.aggregate([
-      { $match: { is_active: true } },
+      { 
+        $match: { 
+          is_active: true,
+          $and: [
+            { $or: [ { target_years: studentYear }, { target_years: { $exists: false } } ] },
+            { $or: [ { target_sections: studentSection }, { target_sections: { $exists: false } } ] }
+          ]
+        } 
+      },
       {
         $lookup: {
           from: 'questions',
@@ -56,11 +69,31 @@ router.get('/exams', async (req, res) => {
   }
 });
 
+// Seeded shuffle helper to randomize questions deterministically per student
+function seededShuffle(array, seedString) {
+  let seed = 0;
+  for (let i = 0; i < seedString.length; i++) {
+    seed = (seed * 31 + seedString.charCodeAt(i)) & 0xffffffff;
+  }
+  function random() {
+    const x = Math.sin(seed++) * 10000;
+    return x - Math.floor(x);
+  }
+  const shuffled = [...array];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+
 // GET /api/student/exams/:id/start — Start exam (get questions without answers)
 router.get('/exams/:id/start', async (req, res) => {
   try {
     const examId = req.params.id;
     const studentId = req.session.student.id;
+    const studentYear = parseInt(req.session.student.year || '0');
+    const studentSection = (req.session.student.section || '').trim().toUpperCase();
 
     if (!mongoose.Types.ObjectId.isValid(examId)) {
       return res.status(400).json({ success: false, message: 'Invalid exam ID' });
@@ -70,13 +103,21 @@ router.get('/exams/:id/start', async (req, res) => {
     if (!exam) return res.status(404).json({ success: false, message: 'Exam not found' });
     if (!exam.is_active) return res.status(403).json({ success: false, message: 'This exam is not currently active' });
 
+    // Target filtering checks
+    if (exam.target_years && exam.target_years.length > 0 && !exam.target_years.includes(studentYear)) {
+      return res.status(403).json({ success: false, message: 'This exam is not assigned to your Year.' });
+    }
+    if (exam.target_sections && exam.target_sections.length > 0 && !exam.target_sections.map(s => s.toUpperCase()).includes(studentSection)) {
+      return res.status(403).json({ success: false, message: 'This exam is not assigned to your Section.' });
+    }
+
     const existingResult = await Result.findOne({ student_id: studentId, exam_id: examId });
     if (existingResult) return res.status(403).json({ success: false, message: 'You have already taken this exam' });
 
-    // Get questions WITHOUT correct_option
+    // Get questions WITHOUT correct_option (for MCQ) and with safe test_cases (for PROGRAM)
     const questionsRaw = await Question.find(
       { exam_id: examId },
-      'id exam_id question_type question_text option_a option_b option_c option_d marks'
+      'id exam_id question_type question_text option_a option_b option_c option_d marks test_cases'
     ).sort({ _id: 1 });
 
     if (questionsRaw.length === 0) {
@@ -92,8 +133,25 @@ router.get('/exams/:id/start', async (req, res) => {
       option_b: q.option_b,
       option_c: q.option_c,
       option_d: q.option_d,
-      marks: q.marks
+      marks: q.marks,
+      test_cases: q.test_cases ? q.test_cases.map(tc => {
+        if (tc.is_public) {
+          return {
+            id: tc._id.toString(),
+            input: tc.input,
+            expected_output: tc.expected_output,
+            is_public: true
+          };
+        }
+        return {
+          id: tc._id.toString(),
+          is_public: false
+        };
+      }) : []
     }));
+
+    // Deterministically shuffle questions unique to each student
+    const shuffledQuestions = seededShuffle(questions, studentId.toString() + examId.toString());
 
     res.json({
       success: true,
@@ -103,7 +161,7 @@ router.get('/exams/:id/start', async (req, res) => {
         description: exam.description,
         duration_minutes: exam.duration_minutes
       },
-      questions
+      questions: shuffledQuestions
     });
   } catch (error) {
     console.error('Start exam error:', error);
@@ -208,6 +266,179 @@ router.get('/results', async (req, res) => {
   } catch (error) {
     console.error('Student results error:', error);
     res.status(500).json({ success: false, message: 'Server error fetching results' });
+  }
+});
+
+// Helper function to run student code against a single testcase
+function runCodeAgainstTestCase(code, language, input, timeoutMs = 3000) {
+  return new Promise((resolve) => {
+    const filename = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const uploadsDir = path.join(__dirname, '..', 'uploads');
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+
+    let filePath, cmd, args, buildCmd = null;
+
+    if (language === 'javascript' || language === 'nodejs') {
+      filePath = path.join(uploadsDir, `${filename}.js`);
+      fs.writeFileSync(filePath, code);
+      cmd = 'node';
+      args = [filePath];
+    } else if (language === 'python') {
+      filePath = path.join(uploadsDir, `${filename}.py`);
+      fs.writeFileSync(filePath, code);
+      cmd = 'python';
+      args = [filePath];
+    } else if (language === 'c') {
+      filePath = path.join(uploadsDir, `${filename}.c`);
+      const execPath = path.join(uploadsDir, filename + (process.platform === 'win32' ? '.exe' : ''));
+      fs.writeFileSync(filePath, code);
+      buildCmd = `gcc "${filePath}" -o "${execPath}"`;
+      cmd = execPath;
+      args = [];
+    } else {
+      return resolve({ status: 'error', error_message: 'Unsupported language selection.' });
+    }
+
+    const cleanUp = () => {
+      try {
+        if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        if (language === 'c') {
+          const execPath = path.join(uploadsDir, filename + (process.platform === 'win32' ? '.exe' : ''));
+          if (fs.existsSync(execPath)) fs.unlinkSync(execPath);
+        }
+      } catch (e) {}
+    };
+
+    if (buildCmd) {
+      exec(buildCmd, { timeout: 8000 }, (compileError, stdout, stderr) => {
+        if (compileError) {
+          cleanUp();
+          return resolve({
+            status: 'error',
+            error_message: `Compilation Error:\n${stderr || compileError.message}`
+          });
+        }
+        runProcess();
+      });
+    } else {
+      runProcess();
+    }
+
+    function runProcess() {
+      const child = spawn(cmd, args, { timeout: timeoutMs });
+      let output = '';
+      let errOutput = '';
+      let isTimeout = false;
+
+      const timer = setTimeout(() => {
+        isTimeout = true;
+        child.kill();
+      }, timeoutMs);
+
+      child.stdout.on('data', (data) => {
+        output += data.toString();
+      });
+
+      child.stderr.on('data', (data) => {
+        errOutput += data.toString();
+      });
+
+      child.on('close', (exitCode) => {
+        clearTimeout(timer);
+        cleanUp();
+
+        if (isTimeout) {
+          return resolve({ status: 'timeout', error_message: 'Time Limit Exceeded (3s)' });
+        }
+
+        if (exitCode !== 0 && errOutput) {
+          return resolve({ status: 'error', error_message: `Runtime Error:\n${errOutput}` });
+        }
+
+        resolve({ status: 'success', stdout: output });
+      });
+
+      if (input) {
+        child.stdin.write(input);
+      }
+      child.stdin.end();
+    }
+  });
+}
+
+// POST /api/student/run-code — Run code against test cases
+router.post('/run-code', async (req, res) => {
+  try {
+    const { questionId, code, language } = req.body;
+
+    if (!questionId || !mongoose.Types.ObjectId.isValid(questionId)) {
+      return res.status(400).json({ success: false, message: 'Invalid question ID' });
+    }
+    if (!code || !code.trim()) {
+      return res.status(400).json({ success: false, message: 'Code cannot be empty' });
+    }
+    if (!['javascript', 'python', 'c'].includes(language)) {
+      return res.status(400).json({ success: false, message: 'Invalid or unsupported language selection.' });
+    }
+
+    const question = await Question.findById(questionId);
+    if (!question) {
+      return res.status(404).json({ success: false, message: 'Question not found' });
+    }
+    if (question.question_type !== 'PROGRAM') {
+      return res.status(400).json({ success: false, message: 'Question is not a programming question' });
+    }
+
+    const results = [];
+
+    // Run code sequentially against each test case
+    for (const tc of question.test_cases) {
+      const execResult = await runCodeAgainstTestCase(code, language, tc.input);
+
+      let status = 'fail';
+      let error_message = execResult.error_message || '';
+      const actual_output = execResult.stdout || '';
+
+      if (execResult.status === 'success') {
+        // Normalize newlines and trim whitespace for robust comparison
+        const normalizedActual = actual_output.replace(/\r\n/g, '\n').trim();
+        const normalizedExpected = tc.expected_output.replace(/\r\n/g, '\n').trim();
+        if (normalizedActual === normalizedExpected) {
+          status = 'pass';
+        }
+      } else if (execResult.status === 'timeout') {
+        status = 'timeout';
+      } else {
+        status = 'error';
+      }
+
+      // Format test case result response
+      if (tc.is_public) {
+        results.push({
+          id: tc._id.toString(),
+          input: tc.input,
+          expected_output: tc.expected_output,
+          actual_output,
+          status,
+          is_public: true,
+          error_message
+        });
+      } else {
+        results.push({
+          id: tc._id.toString(),
+          status,
+          is_public: false,
+          error_message: status === 'error' || status === 'timeout' ? error_message : ''
+        });
+      }
+    }
+
+    res.json({ success: true, results });
+  } catch (error) {
+    console.error('Run code endpoint error:', error);
+    res.status(500).json({ success: false, message: 'Server error during code execution' });
   }
 });
 

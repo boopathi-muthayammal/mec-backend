@@ -95,6 +95,18 @@ router.post('/students/upload', upload.single('file'), async (req, res) => {
       return res.status(400).json({ success: false, message: 'CSV file is empty' });
     }
 
+    const reqYear = parseInt(req.body.year || '0');
+    const reqSection = (req.body.section || '').trim().toUpperCase();
+
+    if (!reqYear || reqYear < 1 || reqYear > 4) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ success: false, message: 'Please select a valid Year (1-4)' });
+    }
+    if (!reqSection) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ success: false, message: 'Please select a valid Section' });
+    }
+
     let inserted = 0;
     let skipped = 0;
     const errors = [];
@@ -105,17 +117,9 @@ router.post('/students/upload', upload.single('file'), async (req, res) => {
       const rollNumber = (row['Roll Number'] || row['roll_number'] || row['RollNumber'] || row['Roll No'] || row['rollno'] || '').trim().toUpperCase();
       const name = (row['Name'] || row['name'] || row['Student Name'] || '').trim();
       const dob = (row['DOB'] || row['dob'] || row['Date of Birth'] || row['DateOfBirth'] || '').trim();
-      const year = parseInt(row['Year'] || row['year'] || '0');
-      const section = (row['Section'] || row['section'] || row['Sec'] || '').trim().toUpperCase();
 
       if (!rollNumber || !name || !dob) {
         errors.push(`Row ${i + 2}: Missing required fields (Roll Number, Name, DOB)`);
-        skipped++;
-        continue;
-      }
-
-      if (!year || year < 1 || year > 4) {
-        errors.push(`Row ${i + 2}: Invalid year for ${rollNumber}`);
         skipped++;
         continue;
       }
@@ -139,8 +143,8 @@ router.post('/students/upload', upload.single('file'), async (req, res) => {
         roll_number: rollNumber,
         name,
         dob: normalizedDob,
-        year,
-        section
+        year: reqYear,
+        section: reqSection
       });
       inserted++;
     }
@@ -303,16 +307,25 @@ router.delete('/students/:id', async (req, res) => {
 // ==================== EXAMS ====================
 router.post('/exams', async (req, res) => {
   try {
-    const { title, description, duration_minutes } = req.body;
+    const { title, description, duration_minutes, target_years, target_sections } = req.body;
     if (!title || !title.trim()) {
       return res.status(400).json({ success: false, message: 'Exam title is required' });
     }
+    if (!target_years || !Array.isArray(target_years) || target_years.length === 0) {
+      return res.status(400).json({ success: false, message: 'Please select at least one target Year.' });
+    }
+    if (!target_sections || !Array.isArray(target_sections) || target_sections.length === 0) {
+      return res.status(400).json({ success: false, message: 'Please select at least one target Section.' });
+    }
+
     const duration = parseInt(duration_minutes) || 30;
     const exam = await Exam.create({
       title: title.trim(),
       description: description ? description.trim() : '',
       duration_minutes: duration,
-      created_by: req.session.admin.id
+      created_by: req.session.admin.id,
+      target_years,
+      target_sections: target_sections.map(s => s.trim().toUpperCase())
     });
     res.status(201).json({ success: true, message: 'Exam created successfully', exam });
   } catch (error) {
@@ -341,6 +354,8 @@ router.get('/exams', async (req, res) => {
           created_by: 1,
           created_at: 1,
           is_active: 1,
+          target_years: 1,
+          target_sections: 1,
           question_count: { $size: '$questions' }
         }
       },
@@ -428,7 +443,7 @@ router.post('/exams/:id/questions', async (req, res) => {
     const exam = await Exam.findById(examId);
     if (!exam) return res.status(404).json({ success: false, message: 'Exam not found' });
 
-    const { question_type, question_text, option_a, option_b, option_c, option_d, correct_option, marks } = req.body;
+    const { question_type, question_text, option_a, option_b, option_c, option_d, correct_option, marks, test_cases } = req.body;
     const type = (question_type || 'MCQ').toUpperCase();
 
     if (!question_text) {
@@ -442,6 +457,15 @@ router.post('/exams/:id/questions', async (req, res) => {
       if (!['A','B','C','D'].includes(correct_option.toUpperCase())) {
         return res.status(400).json({ success: false, message: 'correct_option must be A, B, C, or D' });
       }
+    } else if (type === 'PROGRAM') {
+      if (!test_cases || !Array.isArray(test_cases) || test_cases.length === 0) {
+        return res.status(400).json({ success: false, message: 'Programming questions require at least one test case.' });
+      }
+      for (const tc of test_cases) {
+        if (tc.expected_output === undefined || tc.expected_output === null || tc.expected_output.trim() === '') {
+          return res.status(400).json({ success: false, message: 'Each testcase must have an expected output.' });
+        }
+      }
     }
 
     const question = await Question.create({
@@ -453,7 +477,12 @@ router.post('/exams/:id/questions', async (req, res) => {
       option_c: type === 'MCQ' ? option_c.trim() : null,
       option_d: type === 'MCQ' ? option_d.trim() : null,
       correct_option: type === 'MCQ' ? correct_option.toUpperCase() : null,
-      marks: parseInt(marks) || 1
+      marks: parseInt(marks) || 1,
+      test_cases: type === 'PROGRAM' ? test_cases.map(tc => ({
+        input: tc.input || '',
+        expected_output: tc.expected_output.trim(),
+        is_public: tc.is_public !== false
+      })) : []
     });
 
     res.status(201).json({ success: true, message: 'Question added', question });
