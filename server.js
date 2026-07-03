@@ -3,6 +3,8 @@ const express = require('express');
 const session = require('express-session');
 const path = require('path');
 
+const fs = require('fs');
+
 const { initDatabase } = require('./database');
 
 const app = express();
@@ -23,8 +25,9 @@ app.use(session({
   }
 }));
 
-// Serve static files from 'public' directory
+// Serve static files from 'public' directory and fallback to 'frontend/dist' (local dev setup)
 app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, '..', 'frontend', 'dist')));
 
 // Start server after database is initialized
 async function start() {
@@ -40,15 +43,24 @@ async function start() {
   app.use('/api/admin', adminRoutes);
   app.use('/api/student', studentRoutes);
 
+  // Helper to get active SPA entry path
+  const getIndexHtmlPath = () => {
+    const frontendDist = path.join(__dirname, '..', 'frontend', 'dist', 'index.html');
+    if (fs.existsSync(frontendDist)) {
+      return frontendDist;
+    }
+    return path.join(__dirname, 'public', 'index.html');
+  };
+
   // Root route serves index.html
   app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    res.sendFile(getIndexHtmlPath());
   });
 
   // Catch-all: serve index.html for any unmatched routes (SPA support)
   app.get('*', (req, res) => {
     if (!req.path.startsWith('/api')) {
-      res.sendFile(path.join(__dirname, 'public', 'index.html'));
+      res.sendFile(getIndexHtmlPath());
     } else {
       res.status(404).json({ success: false, message: 'API endpoint not found' });
     }
