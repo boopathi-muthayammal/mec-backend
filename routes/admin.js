@@ -134,6 +134,7 @@ router.post('/students/upload', upload.single('file'), async (req, res) => {
     const errors = [];
 
     for (let i = 0; i < records.length; i++) {
+      const row = records[i];
       // Normalize row keys to lowercase, trimmed, and stripped of non-alphanumeric characters
       const cleanRow = {};
       Object.keys(row).forEach(key => {
@@ -508,6 +509,39 @@ router.post('/exams/:id/reset', async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error resetting exam' });
   }
 });
+
+// PUT /api/admin/exams/:id — Update existing exam details (title, description, duration, date, targets)
+router.put('/exams/:id', async (req, res) => {
+  try {
+    const examId = req.params.id;
+    if (!mongoose.Types.ObjectId.isValid(examId)) {
+      return res.status(400).json({ success: false, message: 'Invalid exam ID' });
+    }
+    const { title, description, duration_minutes, exam_date, target_years, target_sections } = req.body;
+    if (!title || !title.trim()) {
+      return res.status(400).json({ success: false, message: 'Exam title is required' });
+    }
+
+    const exam = await Exam.findById(examId);
+    if (!exam) return res.status(404).json({ success: false, message: 'Exam not found' });
+
+    exam.title = title.trim();
+    exam.description = description ? description.trim() : '';
+    exam.duration_minutes = parseInt(duration_minutes) || 30;
+    if (exam_date) exam.exam_date = new Date(exam_date);
+    if (target_years && Array.isArray(target_years)) exam.target_years = target_years;
+    if (target_sections && Array.isArray(target_sections)) {
+      exam.target_sections = target_sections.map(s => s.trim().toUpperCase());
+    }
+
+    await exam.save();
+    res.json({ success: true, message: 'Exam updated successfully', exam });
+  } catch (error) {
+    console.error('Update exam error:', error);
+    res.status(500).json({ success: false, message: 'Server error updating exam' });
+  }
+});
+
 
 
 // ==================== QUESTIONS ====================
