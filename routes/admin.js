@@ -74,7 +74,64 @@ router.get('/dashboard', async (req, res) => {
   }
 });
 
-// ==================== STUDENTS ====================
+// Helper function to normalize any date input to YYYY-MM-DD format for <input type="date" /> compatibility
+function parseDateToYYYYMMDD(rawDate) {
+  if (rawDate === null || rawDate === undefined) return '';
+  
+  if (rawDate instanceof Date) {
+    const year = rawDate.getFullYear();
+    const month = String(rawDate.getMonth() + 1).padStart(2, '0');
+    const day = String(rawDate.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  let dob = String(rawDate).trim();
+  if (!dob) return '';
+
+  // 1. Already YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dob)) {
+    return dob;
+  }
+
+  // 2. DD-MM-YYYY or DD/MM/YYYY or DD.MM.YYYY
+  const dmyMatch = dob.match(/^(\d{1,2})[-\/\.](\d{1,2})[-\/\.](\d{4})$/);
+  if (dmyMatch) {
+    const day = dmyMatch[1].padStart(2, '0');
+    const month = dmyMatch[2].padStart(2, '0');
+    const year = dmyMatch[3];
+    return `${year}-${month}-${day}`;
+  }
+
+  // 3. YYYY/MM/DD or YYYY.MM.DD
+  const ymdMatch = dob.match(/^(\d{4})[-\/\.](\d{1,2})[-\/\.](\d{1,2})$/);
+  if (ymdMatch) {
+    const year = ymdMatch[1];
+    const month = ymdMatch[2].padStart(2, '0');
+    const day = ymdMatch[3].padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  // 4. DD-MM-YY or DD/MM/YY (2-digit years)
+  const dmy2Match = dob.match(/^(\d{1,2})[-\/\.](\d{1,2})[-\/\.](\d{2})$/);
+  if (dmy2Match) {
+    const day = dmy2Match[1].padStart(2, '0');
+    const month = dmy2Match[2].padStart(2, '0');
+    let year = dmy2Match[3];
+    year = parseInt(year) <= 30 ? `20${year}` : `19${year}`;
+    return `${year}-${month}-${day}`;
+  }
+
+  // 5. Try JS Date parser
+  const parsed = new Date(dob);
+  if (!isNaN(parsed.getTime())) {
+    const year = parsed.getFullYear();
+    const month = String(parsed.getMonth() + 1).padStart(2, '0');
+    const day = String(parsed.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  return '';
+}
 
 // POST /api/admin/students/parse — Parse file without saving to DB
 router.post('/students/parse', upload.single('file'), async (req, res) => {
@@ -137,30 +194,23 @@ router.post('/students/parse', upload.single('file'), async (req, res) => {
       
       let dobRaw = cleanRow['dateofbirth'] || cleanRow['dob'] || '';
       let dob = '';
-      if (dobRaw instanceof Date) {
-        const year = dobRaw.getFullYear();
-        const month = String(dobRaw.getMonth() + 1).padStart(2, '0');
-        const day = String(dobRaw.getDate()).padStart(2, '0');
-        dob = `${year}-${month}-${day}`;
-      } else if (typeof dobRaw === 'number') {
+      if (typeof dobRaw === 'number') {
         const date = new Date((dobRaw - 25569) * 86400 * 1000);
         if (!isNaN(date.getTime())) {
-          const year = date.getFullYear();
-          const month = String(date.getMonth() + 1).padStart(2, '0');
-          const day = String(date.getDate()).padStart(2, '0');
-          dob = `${year}-${month}-${day}`;
+          dob = parseDateToYYYYMMDD(date);
         }
       } else {
-        dob = String(dobRaw).trim();
-        // Normalize string DOB DD-MM-YYYY to YYYY-MM-DD
-        if (/^\d{2}[-\/]\d{2}[-\/]\d{4}$/.test(dob)) {
-          const parts = dob.split(/[-\/]/);
-          dob = `${parts[2]}-${parts[1]}-${parts[0]}`;
-        }
+        dob = parseDateToYYYYMMDD(dobRaw);
       }
 
-      if (rollNumber && name && dob) {
-        formatted.push({ roll_number: rollNumber, name, dob });
+      // Load row into preview even if some fields are missing (e.g. empty DOB),
+      // as long as there is some identifying student info (like roll number or name)
+      if (rollNumber || name) {
+        formatted.push({ 
+          roll_number: rollNumber || '', 
+          name: name || '', 
+          dob: dob || '' 
+        });
       }
     }
 
