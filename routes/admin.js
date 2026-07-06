@@ -244,7 +244,7 @@ router.post('/students/save-bulk', async (req, res) => {
       const name = String(item.name || '').trim();
       const dob = String(item.dob || '').trim();
 
-      if (rollNumber && name && dob) {
+      if (rollNumber && name) {
         // Perform Upsert!
         await Student.findOneAndUpdate(
           { roll_number: rollNumber },
@@ -272,8 +272,8 @@ router.post('/students/add', async (req, res) => {
   try {
     const { roll_number, name, dob, year, section } = req.body;
 
-    if (!roll_number || !name || !dob || !year || !section) {
-      return res.status(400).json({ success: false, message: 'All fields required: roll_number, name, dob, year, section' });
+    if (!roll_number || !name || !year || !section) {
+      return res.status(400).json({ success: false, message: 'Required fields: roll_number, name, year, section' });
     }
 
     const existing = await Student.findOne({ roll_number: roll_number.trim().toUpperCase() });
@@ -282,8 +282,8 @@ router.post('/students/add', async (req, res) => {
     }
 
     // Normalize DOB
-    let normalizedDob = dob.trim();
-    if (/^\d{2}[-\/]\d{2}[-\/]\d{4}$/.test(normalizedDob)) {
+    let normalizedDob = dob ? String(dob).trim() : '';
+    if (normalizedDob && /^\d{2}[-\/]\d{2}[-\/]\d{4}$/.test(normalizedDob)) {
       const parts = normalizedDob.split(/[-\/]/);
       normalizedDob = `${parts[2]}-${parts[1]}-${parts[0]}`;
     }

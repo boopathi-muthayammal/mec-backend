@@ -38,7 +38,7 @@ const adminSchema = new mongoose.Schema({
 const studentSchema = new mongoose.Schema({
   roll_number: { type: String, unique: true, required: true },
   name: { type: String, required: true },
-  dob: { type: String, required: true },
+  dob: { type: String, required: false },
   year: { type: Number, required: true },
   section: { type: String, required: true },
   created_at: { type: Date, default: Date.now }
