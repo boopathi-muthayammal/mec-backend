@@ -399,4 +399,76 @@ router.get('/results', async (req, res) => {
   }
 });
 
+// GET /api/student/results/:resultId/detailed — Fetch detailed answers if results are released
+router.get('/results/:resultId/detailed', async (req, res) => {
+  try {
+    const studentId = req.session.student.id;
+    const resultId = req.params.resultId;
+
+    if (!mongoose.Types.ObjectId.isValid(resultId)) {
+      return res.status(400).json({ success: false, message: 'Invalid result ID' });
+    }
+
+    const result = await Result.findOne({ _id: resultId, student_id: studentId })
+      .populate('exam_id', 'title results_released');
+
+    if (!result) {
+      return res.status(404).json({ success: false, message: 'Result not found' });
+    }
+
+    if (!result.exam_id.results_released) {
+      return res.status(403).json({ success: false, message: 'Results have not been released by the admin yet' });
+    }
+
+    const examId = result.exam_id._id;
+
+    // Fetch all questions for this exam
+    const questions = await Question.find({ exam_id: examId }).sort({ _id: 1 });
+    
+    // Fetch student's answers for this exam
+    const studentAnswers = await Answer.find({ exam_id: examId, student_id: studentId });
+    
+    // Map answers for quick lookup
+    const answersMap = new Map();
+    studentAnswers.forEach(ans => {
+      answersMap.set(ans.question_id.toString(), ans.answer_text);
+    });
+
+    // Combine data
+    const detailedReport = questions.map(q => {
+      const studentAns = answersMap.get(q._id.toString()) || 'Not Answered';
+      const isCorrect = q.question_type === 'MCQ' && studentAns.toUpperCase() === q.correct_option;
+      
+      return {
+        question_id: q._id.toString(),
+        question_text: q.question_text,
+        question_type: q.question_type,
+        options: {
+          A: q.option_a,
+          B: q.option_b,
+          C: q.option_c,
+          D: q.option_d
+        },
+        correct_option: q.correct_option,
+        student_answer: studentAns,
+        is_correct: isCorrect,
+        marks_awarded: isCorrect ? (q.marks || 1) : 0,
+        total_marks: q.marks || 1
+      };
+    });
+
+    res.json({ 
+      success: true, 
+      exam_title: result.exam_id.title,
+      total_score: result.mcq_score,
+      total_possible: result.mcq_total,
+      details: detailedReport 
+    });
+
+  } catch (error) {
+    console.error('Student detailed results error:', error);
+    res.status(500).json({ success: false, message: 'Server error fetching detailed results' });
+  }
+});
+
 module.exports = router;
