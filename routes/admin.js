@@ -217,7 +217,7 @@ router.post('/students/parse', upload.single('file'), async (req, res) => {
     res.json({ success: true, message: `Loaded ${formatted.length} students in memory.`, records: formatted });
   } catch (error) {
     console.error('Parse students error:', error);
-    res.status(500).json({ success: false, message: 'Server error parsing students file' });
+    res.status(500).json({ success: false, message: `Server error parsing students file: ${error.message}` });
   }
 });
 
@@ -271,7 +271,7 @@ router.post('/students/save-bulk', async (req, res) => {
     res.json({ success: true, message: `Successfully synchronized and saved ${saved} student records.` });
   } catch (error) {
     console.error('Save bulk students error:', error);
-    res.status(500).json({ success: false, message: 'Server error saving students' });
+    res.status(500).json({ success: false, message: `Server error saving students: ${error.message}` });
   }
 });
 
@@ -307,7 +307,7 @@ router.post('/students/add', async (req, res) => {
     res.status(201).json({ success: true, message: 'Student added successfully' });
   } catch (error) {
     console.error('Add student error:', error);
-    res.status(500).json({ success: false, message: 'Server error adding student' });
+    res.status(500).json({ success: false, message: `Server error adding student: ${error.message}` });
   }
 });
 
