@@ -339,7 +339,7 @@ router.delete('/students/:id', async (req, res) => {
 // ==================== EXAMS ====================
 router.post('/exams', async (req, res) => {
   try {
-    const { title, description, duration_minutes, target_years, target_sections } = req.body;
+    const { title, description, duration_minutes, target_years, target_sections, exam_date } = req.body;
     if (!title || !title.trim()) {
       return res.status(400).json({ success: false, message: 'Exam title is required' });
     }
@@ -357,7 +357,8 @@ router.post('/exams', async (req, res) => {
       duration_minutes: duration,
       created_by: req.session.admin.id,
       target_years,
-      target_sections: target_sections.map(s => s.trim().toUpperCase())
+      target_sections: target_sections.map(s => s.trim().toUpperCase()),
+      exam_date: exam_date ? new Date(exam_date) : new Date()
     });
     res.status(201).json({ success: true, message: 'Exam created successfully', exam });
   } catch (error) {
@@ -385,6 +386,7 @@ router.get('/exams', async (req, res) => {
           duration_minutes: 1,
           created_by: 1,
           created_at: 1,
+          exam_date: 1,
           is_active: 1,
           target_years: 1,
           target_sections: 1,

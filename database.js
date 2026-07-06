@@ -51,6 +51,7 @@ const examSchema = new mongoose.Schema({
   duration_minutes: { type: Number, required: true, default: 30 },
   created_by: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
   created_at: { type: Date, default: Date.now },
+  exam_date: { type: Date, default: Date.now },
   is_active: { type: Boolean, default: true },
   target_years: { type: [Number], default: [1, 2, 3, 4] },
   target_sections: { type: [String], default: ['A', 'B', 'C', 'D', 'E'] }
