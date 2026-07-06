@@ -76,8 +76,8 @@ router.get('/dashboard', async (req, res) => {
 
 // ==================== STUDENTS ====================
 
-// POST /api/admin/students/upload — Upload CSV
-router.post('/students/upload', upload.single('file'), async (req, res) => {
+// POST /api/admin/students/parse — Parse file without saving to DB
+router.post('/students/parse', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
@@ -94,10 +94,9 @@ router.post('/students/upload', upload.single('file'), async (req, res) => {
         records = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
       } catch (excelErr) {
         if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-        return res.status(400).json({ success: false, message: 'Invalid Excel file. Please check your file.' });
+        return res.status(400).json({ success: false, message: 'Invalid Excel file.' });
       }
     } else {
-      // Treat as CSV
       try {
         const fileContent = fs.readFileSync(req.file.path, 'utf-8');
         records = parse(fileContent, {
@@ -108,34 +107,16 @@ router.post('/students/upload', upload.single('file'), async (req, res) => {
         });
       } catch (parseErr) {
         if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-        return res.status(400).json({ success: false, message: 'Invalid CSV format. Please check your file.' });
+        return res.status(400).json({ success: false, message: 'Invalid CSV format.' });
       }
     }
 
-    if (records.length === 0) {
-      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      return res.status(400).json({ success: false, message: 'Uploaded file is empty' });
-    }
+    // Clean up uploaded file
+    if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
 
-    const reqYear = parseInt(req.body.year || '0');
-    const reqSection = (req.body.section || '').trim().toUpperCase();
-
-    if (!reqYear || reqYear < 1 || reqYear > 4) {
-      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      return res.status(400).json({ success: false, message: 'Please select a valid Year (1-4)' });
-    }
-    if (!reqSection) {
-      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      return res.status(400).json({ success: false, message: 'Please select a valid Section' });
-    }
-
-    let inserted = 0;
-    let skipped = 0;
-    const errors = [];
-
+    const formatted = [];
     for (let i = 0; i < records.length; i++) {
       const row = records[i];
-      // Normalize row keys to lowercase, trimmed, and stripped of non-alphanumeric characters
       const cleanRow = {};
       Object.keys(row).forEach(key => {
         if (key !== null && key !== undefined) {
@@ -162,7 +143,6 @@ router.post('/students/upload', upload.single('file'), async (req, res) => {
         const day = String(dobRaw.getDate()).padStart(2, '0');
         dob = `${year}-${month}-${day}`;
       } else if (typeof dobRaw === 'number') {
-        // Excel serial date number conversion (base date: 1899-12-30)
         const date = new Date((dobRaw - 25569) * 86400 * 1000);
         if (!isNaN(date.getTime())) {
           const year = date.getFullYear();
@@ -172,52 +152,68 @@ router.post('/students/upload', upload.single('file'), async (req, res) => {
         }
       } else {
         dob = String(dobRaw).trim();
+        // Normalize string DOB DD-MM-YYYY to YYYY-MM-DD
+        if (/^\d{2}[-\/]\d{2}[-\/]\d{4}$/.test(dob)) {
+          const parts = dob.split(/[-\/]/);
+          dob = `${parts[2]}-${parts[1]}-${parts[0]}`;
+        }
       }
 
-      if (!rollNumber || !name || !dob) {
-        errors.push(`Row ${i + 2}: Missing required fields (Roll Number, Name, DOB)`);
-        skipped++;
-        continue;
+      if (rollNumber && name && dob) {
+        formatted.push({ roll_number: rollNumber, name, dob });
       }
-
-      // Check duplicate
-      const existing = await Student.findOne({ roll_number: rollNumber });
-      if (existing) {
-        errors.push(`Row ${i + 2}: Roll number ${rollNumber} already exists (skipped)`);
-        skipped++;
-        continue;
-      }
-
-      // Normalize DOB to YYYY-MM-DD
-      let normalizedDob = dob;
-      if (/^\d{2}[-\/]\d{2}[-\/]\d{4}$/.test(dob)) {
-        const parts = dob.split(/[-\/]/);
-        normalizedDob = `${parts[2]}-${parts[1]}-${parts[0]}`;
-      }
-
-      await Student.create({
-        roll_number: rollNumber,
-        name,
-        dob: normalizedDob,
-        year: reqYear,
-        section: reqSection
-      });
-      inserted++;
     }
 
-    // Clean up uploaded file
-    fs.unlinkSync(req.file.path);
-
-    res.json({
-      success: true,
-      message: `${inserted} students uploaded, ${skipped} skipped`,
-      inserted,
-      skipped,
-      errors: errors.slice(0, 20) // limit error messages
-    });
+    res.json({ success: true, message: `Loaded ${formatted.length} students in memory.`, records: formatted });
   } catch (error) {
-    console.error('Student upload error:', error);
-    res.status(500).json({ success: false, message: 'Server error uploading students' });
+    console.error('Parse students error:', error);
+    res.status(500).json({ success: false, message: 'Server error parsing students file' });
+  }
+});
+
+// POST /api/admin/students/save-bulk — Upsert student records from preview roster
+router.post('/students/save-bulk', async (req, res) => {
+  try {
+    const { year, section, students } = req.body;
+    const reqYear = parseInt(year || '0');
+    const reqSection = (section || '').trim().toUpperCase();
+
+    if (!reqYear || reqYear < 1 || reqYear > 4) {
+      return res.status(400).json({ success: false, message: 'Please select a valid Year (1-4)' });
+    }
+    if (!reqSection) {
+      return res.status(400).json({ success: false, message: 'Please select a valid Section' });
+    }
+    if (!students || !Array.isArray(students) || students.length === 0) {
+      return res.status(400).json({ success: false, message: 'No student records to save.' });
+    }
+
+    let saved = 0;
+    for (const item of students) {
+      const rollNumber = String(item.roll_number || '').trim().toUpperCase();
+      const name = String(item.name || '').trim();
+      const dob = String(item.dob || '').trim();
+
+      if (rollNumber && name && dob) {
+        // Perform Upsert!
+        await Student.findOneAndUpdate(
+          { roll_number: rollNumber },
+          {
+            name,
+            dob,
+            year: reqYear,
+            section: reqSection
+          },
+          { upsert: true, new: true }
+         );
+         saved++;
+      }
+    }
+
+    res.json({ success: true, message: `Successfully synchronized and saved ${saved} student records.` });
+  } catch (error) {
+    console.error('Save bulk students error:', error);
+    res.status(500).json({ success: false, message: 'Server error saving students' });
   }
 });
 
