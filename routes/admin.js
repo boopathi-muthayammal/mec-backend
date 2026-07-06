@@ -678,7 +678,7 @@ function parseQuestionsFromText(text) {
     if (!line) continue;
 
     // Check if line starts a question (e.g. "1. What is..." or "Q1. What is..." or "Question 5: What is...")
-    const qMatch = line.match(/^(?:Question|Q|q)?\s*[\-\s]*(\d+)[\.\):\s]\s*(.*)$/i);
+    const qMatch = line.match(/^(?:Question|Q|q)?\s*[\-\s]*(\d+)[\.\):\-\]]\s*(.*)$/i);
     if (qMatch) {
       if (isValidQuestion(currentQuestion)) {
         if (!currentQuestion.correct_option) currentQuestion.correct_option = 'A';
@@ -700,7 +700,7 @@ function parseQuestionsFromText(text) {
     if (!currentQuestion) continue;
 
     // Check if inline options (e.g. a) option1 b) option2 c) option3 d) option4)
-    const inlineOptMatch = line.match(/^(?:\(|\[)?\s*[aA]\s*(?:\)|\.|\]|\s)\s*(.*?)\s*(?:\(|\[)?\s*[bB]\s*(?:\)|\.|\]|\s)\s*(.*?)\s*(?:\(|\[)?\s*[cC]\s*(?:\)|\.|\]|\s)\s*(.*?)\s*(?:\(|\[)?\s*[dD]\s*(?:\)|\.|\]|\s)\s*(.*)$/);
+    const inlineOptMatch = line.match(/^(?:\(|\[)?\s*[aA]\s*(?:\)|\.|\]|:|-)\s*(.*?)\s*(?:\(|\[)?\s*[bB]\s*(?:\)|\.|\]|:|-)\s*(.*?)\s*(?:\(|\[)?\s*[cC]\s*(?:\)|\.|\]|:|-)\s*(.*?)\s*(?:\(|\[)?\s*[dD]\s*(?:\)|\.|\]|:|-)\s*(.*)$/);
     if (inlineOptMatch) {
       currentQuestion.option_a = inlineOptMatch[1].trim();
       currentQuestion.option_b = inlineOptMatch[2].trim();
@@ -710,22 +710,22 @@ function parseQuestionsFromText(text) {
     }
 
     // Check individual options
-    const optAMatch = line.match(/^(?:\(|\[)?\s*[aA]\s*(?:\)|\.|\]|\s)\s*(.*)$/);
+    const optAMatch = line.match(/^(?:\(|\[)?\s*[aA]\s*(?:\)|\.|\]|:|-)\s*(.*)$/);
     if (optAMatch) {
       currentQuestion.option_a = optAMatch[1].trim();
       continue;
     }
-    const optBMatch = line.match(/^(?:\(|\[)?\s*[bB]\s*(?:\)|\.|\]|\s)\s*(.*)$/);
+    const optBMatch = line.match(/^(?:\(|\[)?\s*[bB]\s*(?:\)|\.|\]|:|-)\s*(.*)$/);
     if (optBMatch) {
       currentQuestion.option_b = optBMatch[1].trim();
       continue;
     }
-    const optCMatch = line.match(/^(?:\(|\[)?\s*[cC]\s*(?:\)|\.|\]|\s)\s*(.*)$/);
+    const optCMatch = line.match(/^(?:\(|\[)?\s*[cC]\s*(?:\)|\.|\]|:|-)\s*(.*)$/);
     if (optCMatch) {
       currentQuestion.option_c = optCMatch[1].trim();
       continue;
     }
-    const optDMatch = line.match(/^(?:\(|\[)?\s*[dD]\s*(?:\)|\.|\]|\s)\s*(.*)$/);
+    const optDMatch = line.match(/^(?:\(|\[)?\s*[dD]\s*(?:\)|\.|\]|:|-)\s*(.*)$/);
     if (optDMatch) {
       currentQuestion.option_d = optDMatch[1].trim();
       continue;
