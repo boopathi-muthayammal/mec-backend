@@ -668,9 +668,17 @@ function parseQuestionsFromText(text) {
   const lines = text.replace(/\r\n/g, '\n').split('\n').map(l => l.trim());
   const parsedQuestions = [];
   let currentQuestion = null;
+  let lastLines = [];
 
   const isValidQuestion = (q) => {
     return q && q.question_text && q.option_a; // Require at least question text and option A
+  };
+
+  const pushQuestion = (q) => {
+    if (isValidQuestion(q)) {
+      if (!q.correct_option) q.correct_option = 'A';
+      parsedQuestions.push(q);
+    }
   };
 
   for (let i = 0; i < lines.length; i++) {
@@ -680,10 +688,7 @@ function parseQuestionsFromText(text) {
     // Check if line starts a question (e.g. "1. What is..." or "Q1. What is..." or "Question 5: What is...")
     const qMatch = line.match(/^(?:Question|Q|q)?\s*[\-\s]*(\d+)[\.\):\-\]]\s*(.*)$/i);
     if (qMatch) {
-      if (isValidQuestion(currentQuestion)) {
-        if (!currentQuestion.correct_option) currentQuestion.correct_option = 'A';
-        parsedQuestions.push(currentQuestion);
-      }
+      pushQuestion(currentQuestion);
       currentQuestion = {
         question_text: qMatch[2].trim(),
         option_a: '',
@@ -694,62 +699,85 @@ function parseQuestionsFromText(text) {
         question_type: 'MCQ',
         marks: 1
       };
-      continue;
-    }
-
-    if (!currentQuestion) continue;
-
-    // Check if inline options (e.g. a) option1 b) option2 c) option3 d) option4)
-    const inlineOptMatch = line.match(/^(?:\(|\[)?\s*[aA]\s*(?:\)|\.|\]|:|-)\s*(.*?)\s*(?:\(|\[)?\s*[bB]\s*(?:\)|\.|\]|:|-)\s*(.*?)\s*(?:\(|\[)?\s*[cC]\s*(?:\)|\.|\]|:|-)\s*(.*?)\s*(?:\(|\[)?\s*[dD]\s*(?:\)|\.|\]|:|-)\s*(.*)$/);
-    if (inlineOptMatch) {
-      currentQuestion.option_a = inlineOptMatch[1].trim();
-      currentQuestion.option_b = inlineOptMatch[2].trim();
-      currentQuestion.option_c = inlineOptMatch[3].trim();
-      currentQuestion.option_d = inlineOptMatch[4].trim();
+      lastLines = [];
       continue;
     }
 
     // Check individual options
     const optAMatch = line.match(/^(?:\(|\[)?\s*[aA]\s*(?:\)|\.|\]|:|-)\s*(.*)$/);
     if (optAMatch) {
+      if (!currentQuestion || currentQuestion.option_a) {
+        // Fallback for number-stripped documents: start a new question using accumulated text
+        pushQuestion(currentQuestion);
+
+        let qText = lastLines.join('\n').trim();
+        if (parsedQuestions.length === 0) {
+          // If first question, filter common header lines
+          const headerRegex = /mcqs|quiz|test|exam|assignment|question\s*bank|parser\s*format|instructions|duration|time|marks/i;
+          const linesFiltered = lastLines.filter(l => !headerRegex.test(l));
+          if (linesFiltered.length > 0) qText = linesFiltered.join('\n').trim();
+        }
+
+        currentQuestion = {
+          question_text: qText,
+          option_a: '',
+          option_b: '',
+          option_c: '',
+          option_d: '',
+          correct_option: '',
+          question_type: 'MCQ',
+          marks: 1
+        };
+      }
       currentQuestion.option_a = optAMatch[1].trim();
+      lastLines = [];
       continue;
     }
+
     const optBMatch = line.match(/^(?:\(|\[)?\s*[bB]\s*(?:\)|\.|\]|:|-)\s*(.*)$/);
     if (optBMatch) {
-      currentQuestion.option_b = optBMatch[1].trim();
+      if (currentQuestion) currentQuestion.option_b = optBMatch[1].trim();
+      lastLines = [];
       continue;
     }
     const optCMatch = line.match(/^(?:\(|\[)?\s*[cC]\s*(?:\)|\.|\]|:|-)\s*(.*)$/);
     if (optCMatch) {
-      currentQuestion.option_c = optCMatch[1].trim();
+      if (currentQuestion) currentQuestion.option_c = optCMatch[1].trim();
+      lastLines = [];
       continue;
     }
     const optDMatch = line.match(/^(?:\(|\[)?\s*[dD]\s*(?:\)|\.|\]|:|-)\s*(.*)$/);
     if (optDMatch) {
-      currentQuestion.option_d = optDMatch[1].trim();
+      if (currentQuestion) currentQuestion.option_d = optDMatch[1].trim();
+      lastLines = [];
       continue;
     }
 
     // Check answer line (e.g. "Answer: A" or "Ans - B" or "Correct Option: C" or "Answer is A")
     const ansMatch = line.match(/^(?:Answer|Ans|Correct|Correct Option|Correct Answer|Ans is|Answer is)\s*[\-\[\]\(\):\s]*([a-dE-eA-D])/i);
     if (ansMatch) {
-      currentQuestion.correct_option = ansMatch[1].toUpperCase().trim();
+      if (currentQuestion) {
+        currentQuestion.correct_option = ansMatch[1].toUpperCase().trim();
+        pushQuestion(currentQuestion);
+        currentQuestion = null;
+      }
+      lastLines = [];
       continue;
     }
 
-    // If it's a multi-line question text, append to question_text
-    if (!currentQuestion.option_a && !currentQuestion.option_b && !currentQuestion.option_c && !currentQuestion.option_d && !currentQuestion.correct_option) {
-      currentQuestion.question_text += '\n' + line;
+    // Accumulate lines
+    if (!currentQuestion) {
+      lastLines.push(line);
+    } else {
+      // If we are currently in a question, but have not matched options yet,
+      // it might be multi-line question text!
+      if (!currentQuestion.option_a) {
+        currentQuestion.question_text += '\n' + line;
+      }
     }
   }
 
-  // Push final question if valid
-  if (isValidQuestion(currentQuestion)) {
-    if (!currentQuestion.correct_option) currentQuestion.correct_option = 'A';
-    parsedQuestions.push(currentQuestion);
-  }
-
+  pushQuestion(currentQuestion);
   return parsedQuestions;
 }
 
