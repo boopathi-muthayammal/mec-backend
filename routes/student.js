@@ -327,15 +327,24 @@ router.post('/exams/:id/submit', async (req, res) => {
       await Answer.insertMany(answersToInsert);
     }
 
-    // Insert result
-    await Result.create({
-      student_id: studentId,
-      exam_id: examId,
-      mcq_score: mcqScore,
-      mcq_total: mcqTotal,
-      tab_switches: parseInt(tab_switches) || 0,
-      auto_submitted: !!auto_submitted
-    });
+    // Use upsert to prevent duplicate results if request is retried
+    await Result.findOneAndUpdate(
+      { student_id: studentId, exam_id: examId },
+      {
+        $setOnInsert: {
+          student_id: studentId,
+          exam_id: examId,
+          tab_switches: parseInt(tab_switches) || 0,
+          auto_submitted: !!auto_submitted
+        },
+        $set: {
+          mcq_score: mcqScore,
+          mcq_total: mcqTotal,
+          submitted_at: new Date()
+        }
+      },
+      { upsert: true, new: true }
+    );
 
     res.json({
       success: true,
@@ -375,7 +384,15 @@ router.get('/results', async (req, res) => {
       };
     });
 
-    res.json({ success: true, results });
+    // Deduplicate: keep only the latest result per exam (in case of legacy duplicates in DB)
+    const seen = new Set();
+    const deduplicated = results.filter(r => {
+      if (seen.has(r.exam_id)) return false;
+      seen.add(r.exam_id);
+      return true;
+    });
+
+    res.json({ success: true, results: deduplicated });
   } catch (error) {
     console.error('Student results error:', error);
     res.status(500).json({ success: false, message: 'Server error fetching results' });
