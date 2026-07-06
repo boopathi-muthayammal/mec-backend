@@ -62,26 +62,21 @@ router.get('/exams', async (req, res) => {
       { $sort: { created_at: -1 } }
     ]);
 
-    const takenExams = await Result.find({ student_id: studentId }, 'exam_id');
-    const takenExamIds = new Set(takenExams.map(r => r.exam_id.toString()));
-
-    // For already-taken exams, find how many questions have no answer yet (new questions added after submission)
-    const studentIdObj = new mongoose.Types.ObjectId(studentId);
-    const studentAnswers = await Answer.find({ student_id: studentIdObj }, 'exam_id question_id');
-    const answeredMap = {}; // examId -> Set of answered question IDs
-    for (const ans of studentAnswers) {
-      const eid = ans.exam_id.toString();
-      if (!answeredMap[eid]) answeredMap[eid] = new Set();
-      answeredMap[eid].add(ans.question_id.toString());
-    }
+    const takenExams = await Result.find({ student_id: studentId }, 'exam_id submitted_at');
+    const takenExamsMap = new Map(takenExams.map(r => [r.exam_id.toString(), r.submitted_at]));
 
     const examsWithStatus = exams.map(exam => {
       const eid = exam._id.toString();
-      const alreadyTaken = takenExamIds.has(eid);
+      const alreadyTaken = takenExamsMap.has(eid);
       let newQuestionCount = 0;
       if (alreadyTaken && exam.question_ids) {
-        const answered = answeredMap[eid] || new Set();
-        newQuestionCount = exam.question_ids.filter(qid => !answered.has(qid.toString())).length;
+        const submissionTime = takenExamsMap.get(eid);
+        // A question is considered "newly added" if its creation timestamp (from its ObjectId)
+        // is strictly greater than the student's exam submission time.
+        newQuestionCount = exam.question_ids.filter(qid => {
+          const qTimestamp = qid.getTimestamp();
+          return qTimestamp > submissionTime;
+        }).length;
       }
       return {
         ...exam,
@@ -172,15 +167,18 @@ router.get('/exams/:id/start', async (req, res) => {
 
     // --- PARTIAL RETAKE: student already submitted but admin added new questions ---
     if (existingResult) {
-      const studentAnswers = await Answer.find({ student_id: studentId, exam_id: examId }, 'question_id');
-      const answeredQIds = new Set(studentAnswers.map(a => a.question_id.toString()));
-      const unansweredRaw = questionsRaw.filter(q => !answeredQIds.has(q._id.toString()));
+      const submissionTime = existingResult.submitted_at;
+      // Filter questions to only those created after the student's submission time
+      const newQuestionsRaw = questionsRaw.filter(q => {
+        const qTimestamp = q._id.getTimestamp();
+        return qTimestamp > submissionTime;
+      });
 
-      if (unansweredRaw.length === 0) {
+      if (newQuestionsRaw.length === 0) {
         return res.status(403).json({ success: false, message: 'You have already completed this exam and there are no new questions.' });
       }
 
-      const unansweredQuestions = unansweredRaw.map(mapQuestion);
+      const unansweredQuestions = newQuestionsRaw.map(mapQuestion);
       // No shuffle for partial retake — show new questions in order
       return res.json({
         success: true,
