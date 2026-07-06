@@ -458,6 +458,7 @@ router.get('/exams', async (req, res) => {
           created_at: 1,
           exam_date: 1,
           is_active: 1,
+          results_released: 1,
           target_years: 1,
           target_sections: 1,
           question_count: { $size: '$questions' }
@@ -535,6 +536,25 @@ router.put('/exams/:id/toggle', async (req, res) => {
   }
 });
 
+router.put('/exams/:id/toggle-results-release', async (req, res) => {
+  try {
+    const examId = req.params.id;
+    if (!mongoose.Types.ObjectId.isValid(examId)) {
+      return res.status(400).json({ success: false, message: 'Invalid exam ID' });
+    }
+    const exam = await Exam.findById(examId);
+    if (!exam) return res.status(404).json({ success: false, message: 'Exam not found' });
+
+    exam.results_released = !exam.results_released;
+    await exam.save();
+
+    res.json({ success: true, message: `Exam results ${exam.results_released ? 'released' : 'locked'}`, exam });
+  } catch (error) {
+    console.error('Toggle exam results release error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // POST /api/admin/exams/:id/reset — Reset exam results so all students can retake it
 router.post('/exams/:id/reset', async (req, res) => {
   try {
@@ -603,45 +623,29 @@ router.post('/exams/:id/questions', async (req, res) => {
     if (!exam) return res.status(404).json({ success: false, message: 'Exam not found' });
 
     const { question_type, question_text, option_a, option_b, option_c, option_d, correct_option, marks, test_cases } = req.body;
-    const type = (question_type || 'MCQ').toUpperCase();
+    const type = 'MCQ';
 
     if (!question_text) {
       return res.status(400).json({ success: false, message: 'Question text is required' });
     }
 
-    if (type === 'MCQ') {
-      if (!option_a || !option_b || !option_c || !option_d || !correct_option) {
-        return res.status(400).json({ success: false, message: 'MCQ requires all options and correct answer' });
-      }
-      if (!['A','B','C','D'].includes(correct_option.toUpperCase())) {
-        return res.status(400).json({ success: false, message: 'correct_option must be A, B, C, or D' });
-      }
-    } else if (type === 'PROGRAM') {
-      if (!test_cases || !Array.isArray(test_cases) || test_cases.length === 0) {
-        return res.status(400).json({ success: false, message: 'Programming questions require at least one test case.' });
-      }
-      for (const tc of test_cases) {
-        if (tc.expected_output === undefined || tc.expected_output === null || tc.expected_output.trim() === '') {
-          return res.status(400).json({ success: false, message: 'Each testcase must have an expected output.' });
-        }
-      }
+    if (!option_a || !option_b || !option_c || !option_d || !correct_option) {
+      return res.status(400).json({ success: false, message: 'MCQ requires all options and correct answer' });
+    }
+    if (!['A','B','C','D'].includes(correct_option.toUpperCase())) {
+      return res.status(400).json({ success: false, message: 'correct_option must be A, B, C, or D' });
     }
 
     const question = await Question.create({
       exam_id: examId,
       question_type: type,
       question_text: question_text.trim(),
-      option_a: type === 'MCQ' ? option_a.trim() : null,
-      option_b: type === 'MCQ' ? option_b.trim() : null,
-      option_c: type === 'MCQ' ? option_c.trim() : null,
-      option_d: type === 'MCQ' ? option_d.trim() : null,
-      correct_option: type === 'MCQ' ? correct_option.toUpperCase() : null,
-      marks: parseInt(marks) || 1,
-      test_cases: type === 'PROGRAM' ? test_cases.map(tc => ({
-        input: tc.input || '',
-        expected_output: tc.expected_output.trim(),
-        is_public: tc.is_public !== false
-      })) : []
+      option_a: option_a.trim(),
+      option_b: option_b.trim(),
+      option_c: option_c.trim(),
+      option_d: option_d.trim(),
+      correct_option: correct_option.toUpperCase(),
+      marks: parseInt(marks) || 1
     });
 
     res.status(201).json({ success: true, message: 'Question added', question });
@@ -926,7 +930,7 @@ router.get('/results/class-report', async (req, res) => {
       .filter(r => r.student_id && studentIdsInClass.has(r.student_id.toString()))
       .map(r => ({
         student_id: r.student_id.toString(),
-        total_score: (r.mcq_score || 0) + (r.program_score || 0)
+        total_score: r.mcq_score || 0
       }))
       .sort((a, b) => b.total_score - a.total_score);
 
@@ -955,10 +959,8 @@ router.get('/results/class-report', async (req, res) => {
         score_details: hasResult ? {
           mcq_score: result.mcq_score,
           mcq_total: result.mcq_total,
-          program_score: result.program_score || 0,
-          program_total: result.program_total || 0,
-          total_score: (result.mcq_score || 0) + (result.program_score || 0),
-          total_possible: (result.mcq_total || 0) + (result.program_total || 0)
+          total_score: result.mcq_score || 0,
+          total_possible: result.mcq_total || 0
         } : null,
         tab_switches: hasResult ? result.tab_switches : 0,
         auto_submitted: hasResult ? result.auto_submitted : false,

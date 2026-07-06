@@ -53,6 +53,7 @@ const examSchema = new mongoose.Schema({
   created_at: { type: Date, default: Date.now },
   exam_date: { type: Date, default: Date.now },
   is_active: { type: Boolean, default: true },
+  results_released: { type: Boolean, default: false },
   target_years: { type: [Number], default: [1, 2, 3, 4] },
   target_sections: { type: [String], default: ['A', 'B', 'C', 'D', 'E'] }
 }, schemaOptions);
@@ -60,19 +61,14 @@ const examSchema = new mongoose.Schema({
 // 4. Question Schema
 const questionSchema = new mongoose.Schema({
   exam_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Exam', required: true },
-  question_type: { type: String, enum: ['MCQ', 'PROGRAM'], default: 'MCQ', required: true },
+  question_type: { type: String, enum: ['MCQ'], default: 'MCQ', required: true },
   question_text: { type: String, required: true },
-  option_a: { type: String },
-  option_b: { type: String },
-  option_c: { type: String },
-  option_d: { type: String },
-  correct_option: { type: String }, // A, B, C, or D for MCQ
-  marks: { type: Number, required: true, default: 1 },
-  test_cases: [{
-    input: { type: String, default: '' },
-    expected_output: { type: String, required: true },
-    is_public: { type: Boolean, default: true }
-  }]
+  option_a: { type: String, required: true },
+  option_b: { type: String, required: true },
+  option_c: { type: String, required: true },
+  option_d: { type: String, required: true },
+  correct_option: { type: String, required: true }, // A, B, C, or D for MCQ
+  marks: { type: Number, required: true, default: 1 }
 }, schemaOptions);
 
 // 5. Answer Schema
@@ -81,7 +77,6 @@ const answerSchema = new mongoose.Schema({
   exam_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Exam', required: true },
   question_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Question', required: true },
   answer_text: { type: String },
-  language: { type: String, default: null },
   submitted_at: { type: Date, default: Date.now }
 }, schemaOptions);
 
@@ -91,9 +86,6 @@ const resultSchema = new mongoose.Schema({
   exam_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Exam', required: true },
   mcq_score: { type: Number, required: true, default: 0 },
   mcq_total: { type: Number, required: true, default: 0 },
-  program_score: { type: Number, default: 0 },
-  program_total: { type: Number, default: 0 },
-  program_submitted: { type: Boolean, default: false },
   tab_switches: { type: Number, default: 0 },
   auto_submitted: { type: Boolean, default: false },
   submitted_at: { type: Date, default: Date.now }
