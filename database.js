@@ -80,6 +80,7 @@ const answerSchema = new mongoose.Schema({
   exam_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Exam', required: true },
   question_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Question', required: true },
   answer_text: { type: String },
+  language: { type: String, default: null },
   submitted_at: { type: Date, default: Date.now }
 }, schemaOptions);
 
@@ -89,6 +90,8 @@ const resultSchema = new mongoose.Schema({
   exam_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Exam', required: true },
   mcq_score: { type: Number, required: true, default: 0 },
   mcq_total: { type: Number, required: true, default: 0 },
+  program_score: { type: Number, default: 0 },
+  program_total: { type: Number, default: 0 },
   program_submitted: { type: Boolean, default: false },
   tab_switches: { type: Number, default: 0 },
   auto_submitted: { type: Boolean, default: false },

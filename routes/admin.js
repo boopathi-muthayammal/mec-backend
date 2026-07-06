@@ -42,11 +42,15 @@ router.get('/dashboard', async (req, res) => {
 
     const recentResults = recentResultsRaw.map(r => ({
       id: r._id.toString(),
+      student_id: r.student_id ? r.student_id._id.toString() : null,
+      exam_id: r.exam_id ? r.exam_id._id.toString() : null,
       student_name: r.student_id ? r.student_id.name : 'Unknown Student',
       roll_number: r.student_id ? r.student_id.roll_number : '—',
       exam_title: r.exam_id ? r.exam_id.title : 'Deleted Exam',
       mcq_score: r.mcq_score,
       mcq_total: r.mcq_total,
+      program_score: r.program_score || 0,
+      program_total: r.program_total || 0,
       program_submitted: r.program_submitted,
       auto_submitted: r.auto_submitted,
       tab_switches: r.tab_switches,
@@ -499,17 +503,18 @@ function parseQuestionsFromText(text) {
   let currentQuestion = null;
 
   const isValidQuestion = (q) => {
-    return q && q.question_text && q.option_a && q.option_b && q.option_c && q.option_d && q.correct_option;
+    return q && q.question_text && q.option_a; // Require at least question text and option A
   };
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (!line) continue;
 
-    // Check if line starts a question (e.g. "1. What is..." or "Q1. What is..." or "5) What is...")
-    const qMatch = line.match(/^(?:Q|q)?\s*(\d+)[\.\)]\s*(.*)$/);
+    // Check if line starts a question (e.g. "1. What is..." or "Q1. What is..." or "Question 5: What is...")
+    const qMatch = line.match(/^(?:Question|Q|q)?\s*[\-\s]*(\d+)[\.\):\s]\s*(.*)$/i);
     if (qMatch) {
       if (isValidQuestion(currentQuestion)) {
+        if (!currentQuestion.correct_option) currentQuestion.correct_option = 'A';
         parsedQuestions.push(currentQuestion);
       }
       currentQuestion = {
@@ -528,7 +533,7 @@ function parseQuestionsFromText(text) {
     if (!currentQuestion) continue;
 
     // Check if inline options (e.g. a) option1 b) option2 c) option3 d) option4)
-    const inlineOptMatch = line.match(/^[aA][\.\)]\s*(.*?)\s*[bB][\.\)]\s*(.*?)\s*[cC][\.\)]\s*(.*?)\s*[dD][\.\)]\s*(.*)$/);
+    const inlineOptMatch = line.match(/^(?:\(|\[)?\s*[aA]\s*(?:\)|\.|\]|\s)\s*(.*?)\s*(?:\(|\[)?\s*[bB]\s*(?:\)|\.|\]|\s)\s*(.*?)\s*(?:\(|\[)?\s*[cC]\s*(?:\)|\.|\]|\s)\s*(.*?)\s*(?:\(|\[)?\s*[dD]\s*(?:\)|\.|\]|\s)\s*(.*)$/);
     if (inlineOptMatch) {
       currentQuestion.option_a = inlineOptMatch[1].trim();
       currentQuestion.option_b = inlineOptMatch[2].trim();
@@ -538,29 +543,29 @@ function parseQuestionsFromText(text) {
     }
 
     // Check individual options
-    const optAMatch = line.match(/^[aA][\.\)]\s*(.*)$/);
+    const optAMatch = line.match(/^(?:\(|\[)?\s*[aA]\s*(?:\)|\.|\]|\s)\s*(.*)$/);
     if (optAMatch) {
       currentQuestion.option_a = optAMatch[1].trim();
       continue;
     }
-    const optBMatch = line.match(/^[bB][\.\)]\s*(.*)$/);
+    const optBMatch = line.match(/^(?:\(|\[)?\s*[bB]\s*(?:\)|\.|\]|\s)\s*(.*)$/);
     if (optBMatch) {
       currentQuestion.option_b = optBMatch[1].trim();
       continue;
     }
-    const optCMatch = line.match(/^[cC][\.\)]\s*(.*)$/);
+    const optCMatch = line.match(/^(?:\(|\[)?\s*[cC]\s*(?:\)|\.|\]|\s)\s*(.*)$/);
     if (optCMatch) {
       currentQuestion.option_c = optCMatch[1].trim();
       continue;
     }
-    const optDMatch = line.match(/^[dD][\.\)]\s*(.*)$/);
+    const optDMatch = line.match(/^(?:\(|\[)?\s*[dD]\s*(?:\)|\.|\]|\s)\s*(.*)$/);
     if (optDMatch) {
       currentQuestion.option_d = optDMatch[1].trim();
       continue;
     }
 
-    // Check answer line (e.g. "Answer: A" or "Ans - B" or "Correct Option: C")
-    const ansMatch = line.match(/^(?:Answer|Ans|Correct Answer|Correct Option|Correct)\s*[\-:\s]\s*([a-dA-D])/i);
+    // Check answer line (e.g. "Answer: A" or "Ans - B" or "Correct Option: C" or "Answer is A")
+    const ansMatch = line.match(/^(?:Answer|Ans|Correct|Correct Option|Correct Answer|Ans is|Answer is)\s*[\-\[\]\(\):\s]*([a-dE-eA-D])/i);
     if (ansMatch) {
       currentQuestion.correct_option = ansMatch[1].toUpperCase().trim();
       continue;
@@ -574,6 +579,7 @@ function parseQuestionsFromText(text) {
 
   // Push final question if valid
   if (isValidQuestion(currentQuestion)) {
+    if (!currentQuestion.correct_option) currentQuestion.correct_option = 'A';
     parsedQuestions.push(currentQuestion);
   }
 
@@ -618,6 +624,13 @@ router.post('/exams/:id/upload-questions', upload.single('file'), async (req, re
 
     // Clean up uploaded file
     if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+
+    // Debug: Dump raw text to help inspect the user's PDF formatting
+    try {
+      fs.writeFileSync(path.join(__dirname, '../uploads/last_uploaded_text.txt'), text);
+    } catch (e) {
+      console.error('Error writing debug file:', e);
+    }
 
     // Parse questions from extracted text
     const parsedQuestions = parseQuestionsFromText(text);
@@ -701,6 +714,8 @@ router.get('/results', async (req, res) => {
       exam_id: r.exam_id ? r.exam_id._id.toString() : null,
       mcq_score: r.mcq_score,
       mcq_total: r.mcq_total,
+      program_score: r.program_score || 0,
+      program_total: r.program_total || 0,
       program_submitted: r.program_submitted,
       tab_switches: r.tab_switches,
       auto_submitted: r.auto_submitted,
@@ -737,6 +752,7 @@ router.get('/exams/:id/answers/:studentId', async (req, res) => {
       exam_id: a.exam_id.toString(),
       question_id: a.question_id ? a.question_id._id.toString() : null,
       answer_text: a.answer_text,
+      language: a.language || null,
       submitted_at: a.submitted_at,
       question_text: a.question_id ? a.question_id.question_text : 'Deleted Question',
       question_type: a.question_id ? a.question_id.question_type : 'MCQ',

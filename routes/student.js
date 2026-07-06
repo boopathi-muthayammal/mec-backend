@@ -7,6 +7,14 @@ const { Exam, Question, Result, Answer } = require('../database');
 
 const router = express.Router();
 
+// Ensure MSYS2/MinGW PATH is loaded programmatically on Windows for code execution
+if (process.platform === 'win32') {
+  const extraPath = 'C:\\msys64\\ucrt64\\bin';
+  if (!process.env.PATH.includes(extraPath)) {
+    process.env.PATH = `${process.env.PATH};${extraPath}`;
+  }
+}
+
 function studentAuth(req, res, next) {
   if (!req.session.student) {
     return res.status(401).json({ success: false, message: 'Unauthorized. Student login required.' });
@@ -185,7 +193,7 @@ router.post('/exams/:id/submit', async (req, res) => {
     const existingResult = await Result.findOne({ student_id: studentId, exam_id: examId });
     if (existingResult) return res.status(403).json({ success: false, message: 'You have already submitted this exam' });
 
-    const { answers, tab_switches, auto_submitted } = req.body;
+    const { answers, languages, tab_switches, auto_submitted } = req.body;
 
     if (!answers || typeof answers !== 'object') {
       return res.status(400).json({ success: false, message: 'Answers object is required' });
@@ -196,12 +204,15 @@ router.post('/exams/:id/submit', async (req, res) => {
 
     let mcqScore = 0;
     let mcqTotal = 0;
+    let programScore = 0;
+    let programTotal = 0;
     let programSubmitted = false;
 
-    // Save each answer and calculate MCQ score
+    // Save each answer and calculate scores
     for (const question of questions) {
       const qIdStr = question._id.toString();
       const studentAnswer = answers[qIdStr] || answers[question._id] || '';
+      const studentLang = (languages && (languages[qIdStr] || languages[question._id])) || null;
 
       if (question.question_type === 'MCQ') {
         mcqTotal += (question.marks || 1);
@@ -209,8 +220,31 @@ router.post('/exams/:id/submit', async (req, res) => {
           mcqScore += (question.marks || 1);
         }
       } else if (question.question_type === 'PROGRAM') {
+        programTotal += (question.marks || 1);
         if (studentAnswer && studentAnswer.trim().length > 0) {
           programSubmitted = true;
+          
+          let passedCases = 0;
+          const totalCases = question.test_cases ? question.test_cases.length : 0;
+          
+          if (totalCases > 0) {
+            for (const tc of question.test_cases) {
+              try {
+                const execResult = await runCodeAgainstTestCase(studentAnswer, studentLang || 'javascript', tc.input);
+                if (execResult.status === 'success') {
+                  const normalizedActual = (execResult.stdout || '').replace(/\r\n/g, '\n').trim();
+                  const normalizedExpected = (tc.expected_output || '').replace(/\r\n/g, '\n').trim();
+                  if (normalizedActual === normalizedExpected) {
+                    passedCases++;
+                  }
+                }
+              } catch (tcErr) {
+                console.error(`Error running test case for question ${qIdStr}:`, tcErr);
+              }
+            }
+            // Proportional marks calculation
+            programScore += (passedCases / totalCases) * (question.marks || 1);
+          }
         }
       }
 
@@ -220,10 +254,13 @@ router.post('/exams/:id/submit', async (req, res) => {
           student_id: studentId,
           exam_id: examId,
           question_id: question._id,
-          answer_text: typeof studentAnswer === 'string' ? studentAnswer : studentAnswer.toString()
+          answer_text: typeof studentAnswer === 'string' ? studentAnswer : studentAnswer.toString(),
+          language: studentLang
         });
       }
     }
+
+    const finalProgramScore = Math.round(programScore * 100) / 100;
 
     // Insert result
     await Result.create({
@@ -231,6 +268,8 @@ router.post('/exams/:id/submit', async (req, res) => {
       exam_id: examId,
       mcq_score: mcqScore,
       mcq_total: mcqTotal,
+      program_score: finalProgramScore,
+      program_total: programTotal,
       program_submitted: programSubmitted,
       tab_switches: parseInt(tab_switches) || 0,
       auto_submitted: !!auto_submitted
@@ -238,7 +277,14 @@ router.post('/exams/:id/submit', async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Exam submitted successfully'
+      message: 'Exam submitted successfully',
+      evaluation: {
+        mcq_score: mcqScore,
+        mcq_total: mcqTotal,
+        program_score: finalProgramScore,
+        program_total: programTotal,
+        tab_switches: parseInt(tab_switches) || 0
+      }
     });
   } catch (error) {
     console.error('Submit exam error:', error);
@@ -439,6 +485,32 @@ router.post('/run-code', async (req, res) => {
   } catch (error) {
     console.error('Run code endpoint error:', error);
     res.status(500).json({ success: false, message: 'Server error during code execution' });
+  }
+});
+
+// POST /api/student/run-custom-code — Run code against custom user-provided input
+router.post('/run-custom-code', async (req, res) => {
+  try {
+    const { code, language, customInput } = req.body;
+
+    if (!code || !code.trim()) {
+      return res.status(400).json({ success: false, message: 'Code cannot be empty' });
+    }
+    if (!['javascript', 'python', 'c'].includes(language)) {
+      return res.status(400).json({ success: false, message: 'Invalid or unsupported language selection.' });
+    }
+
+    const execResult = await runCodeAgainstTestCase(code, language, customInput || '');
+
+    res.json({
+      success: true,
+      status: execResult.status,
+      stdout: execResult.stdout || '',
+      error_message: execResult.error_message || ''
+    });
+  } catch (error) {
+    console.error('Run custom code endpoint error:', error);
+    res.status(500).json({ success: false, message: 'Server error during custom code execution' });
   }
 });
 

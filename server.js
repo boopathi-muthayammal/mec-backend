@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const cors = require('cors');
 const session = require('express-session');
 const path = require('path');
 
@@ -8,35 +9,18 @@ const fs = require('fs');
 const { initDatabase } = require('./database');
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 // Trust first proxy (needed for secure cookies behind reverse proxies like Render/Vercel)
 app.set('trust proxy', 1);
 
 // Middleware
+app.use(cors({
+  origin: process.env.CLIENT_URL,
+  credentials: true
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-// Custom CORS middleware to support credentialed cross-origin requests from Vercel frontend
-app.use((req, res, next) => {
-  const allowedOrigins = [
-    'https://mec-frontend.vercel.app',
-    'https://mec-frontend-.vercel.app',
-    'http://localhost:5173'
-  ];
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
-  }
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
-  }
-  next();
-});
 
 const isProd = process.env.NODE_ENV === 'production';
 
