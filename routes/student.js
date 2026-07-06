@@ -74,8 +74,21 @@ router.get('/exams', async (req, res) => {
         // A question is considered "newly added" if its creation timestamp (from its ObjectId)
         // is strictly greater than the student's exam submission time.
         newQuestionCount = exam.question_ids.filter(qid => {
-          const qTimestamp = qid.getTimestamp();
-          return qTimestamp > submissionTime;
+          try {
+            let oid = qid;
+            if (typeof qid === 'string') {
+              oid = new mongoose.Types.ObjectId(qid);
+            } else if (qid && typeof qid === 'object' && !qid.getTimestamp && qid.toString) {
+              oid = new mongoose.Types.ObjectId(qid.toString());
+            }
+            if (oid && typeof oid.getTimestamp === 'function') {
+              const qTimestamp = oid.getTimestamp();
+              return qTimestamp > submissionTime;
+            }
+          } catch (e) {
+            console.error('Error getting timestamp for qid:', qid, e);
+          }
+          return false;
         }).length;
       }
       return {
@@ -170,8 +183,19 @@ router.get('/exams/:id/start', async (req, res) => {
       const submissionTime = existingResult.submitted_at;
       // Filter questions to only those created after the student's submission time
       const newQuestionsRaw = questionsRaw.filter(q => {
-        const qTimestamp = q._id.getTimestamp();
-        return qTimestamp > submissionTime;
+        try {
+          let oid = q._id;
+          if (typeof oid === 'string') {
+            oid = new mongoose.Types.ObjectId(oid);
+          }
+          if (oid && typeof oid.getTimestamp === 'function') {
+            const qTimestamp = oid.getTimestamp();
+            return qTimestamp > submissionTime;
+          }
+        } catch (e) {
+          console.error('Error getting timestamp for question _id:', q._id, e);
+        }
+        return false;
       });
 
       if (newQuestionsRaw.length === 0) {
