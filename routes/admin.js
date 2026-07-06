@@ -238,26 +238,34 @@ router.post('/students/save-bulk', async (req, res) => {
       return res.status(400).json({ success: false, message: 'No student records to save.' });
     }
 
-    let saved = 0;
+    const bulkOps = [];
     for (const item of students) {
       const rollNumber = String(item.roll_number || '').trim().toUpperCase();
       const name = String(item.name || '').trim();
       const dob = String(item.dob || '').trim();
 
       if (rollNumber && name) {
-        // Perform Upsert!
-        await Student.findOneAndUpdate(
-          { roll_number: rollNumber },
-          {
-            name,
-            dob,
-            year: reqYear,
-            section: reqSection
-          },
-          { upsert: true, new: true }
-         );
-         saved++;
+        bulkOps.push({
+          updateOne: {
+            filter: { roll_number: rollNumber },
+            update: {
+              $set: {
+                name,
+                dob,
+                year: reqYear,
+                section: reqSection
+              }
+            },
+            upsert: true
+          }
+        });
       }
+    }
+
+    let saved = 0;
+    if (bulkOps.length > 0) {
+      const result = await Student.bulkWrite(bulkOps);
+      saved = (result.upsertedCount || 0) + (result.modifiedCount || 0) + (result.matchedCount || 0);
     }
 
     res.json({ success: true, message: `Successfully synchronized and saved ${saved} student records.` });
@@ -801,22 +809,20 @@ router.post('/exams/:id/upload-questions', upload.single('file'), async (req, re
       });
     }
 
-    // Insert questions to DB
-    const insertedQuestions = [];
-    for (const q of parsedQuestions) {
-      const question = await Question.create({
-        exam_id: examId,
-        question_type: 'MCQ',
-        question_text: q.question_text,
-        option_a: q.option_a,
-        option_b: q.option_b,
-        option_c: q.option_c,
-        option_d: q.option_d,
-        correct_option: q.correct_option,
-        marks: q.marks || 1
-      });
-      insertedQuestions.push(question);
-    }
+    // Insert questions to DB in batch
+    const questionsToInsert = parsedQuestions.map(q => ({
+      exam_id: examId,
+      question_type: 'MCQ',
+      question_text: q.question_text,
+      option_a: q.option_a,
+      option_b: q.option_b,
+      option_c: q.option_c,
+      option_d: q.option_d,
+      correct_option: q.correct_option,
+      marks: q.marks || 1
+    }));
+
+    const insertedQuestions = await Question.insertMany(questionsToInsert);
 
     res.json({
       success: true,

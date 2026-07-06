@@ -205,6 +205,8 @@ router.post('/exams/:id/submit', async (req, res) => {
     let mcqScore = 0;
     let mcqTotal = 0;
 
+    const answersToInsert = [];
+
     // Save each answer and calculate scores
     for (const question of questions) {
       const qIdStr = question._id.toString();
@@ -217,15 +219,19 @@ router.post('/exams/:id/submit', async (req, res) => {
         }
       }
 
-      // Save answer to answers table
+      // Buffer answer for batch insertion
       if (studentAnswer) {
-        await Answer.create({
+        answersToInsert.push({
           student_id: studentId,
           exam_id: examId,
           question_id: question._id,
           answer_text: typeof studentAnswer === 'string' ? studentAnswer : studentAnswer.toString()
         });
       }
+    }
+
+    if (answersToInsert.length > 0) {
+      await Answer.insertMany(answersToInsert);
     }
 
     // Insert result
