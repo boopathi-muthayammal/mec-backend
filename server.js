@@ -22,12 +22,20 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+const MongoStore = require('connect-mongo');
+
 const isProd = process.env.NODE_ENV === 'production';
 
 app.use(session({
   secret: 'exam-portal-secret-key-2024',
   resave: false,
   saveUninitialized: false,
+  store: MongoStore.create({
+    mongoUrl: process.env.MONGODB_URI,
+    collectionName: 'sessions',
+    autoRemove: 'native',
+    ttl: 24 * 60 * 60 // 1 day
+  }),
   cookie: {
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
     httpOnly: true,
