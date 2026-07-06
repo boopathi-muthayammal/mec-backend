@@ -1129,4 +1129,63 @@ router.get('/exams/:id/answers/:studentId', async (req, res) => {
   }
 });
 
+// POST /api/admin/fix-incomplete-submissions
+// Fixes students who were auto-submitted during a partial retake but have no Answer records
+// for the new questions — causing "Answer New Questions" to keep appearing on their dashboard.
+router.post('/fix-incomplete-submissions', async (req, res) => {
+  try {
+    // Find all results (at least one result = they submitted at least once)
+    const allResults = await Result.find({});
+    let fixedCount = 0;
+    const fixedStudents = [];
+
+    for (const result of allResults) {
+      const studentId = result.student_id;
+      const examId = result.exam_id;
+
+      // Get all questions for this exam
+      const allQuestions = await Question.find({ exam_id: examId }, '_id');
+      const allQIds = allQuestions.map(q => q._id.toString());
+
+      // Get questions this student has already answered
+      const existingAnswers = await Answer.find({ student_id: studentId, exam_id: examId }, 'question_id');
+      const answeredQIds = new Set(existingAnswers.map(a => a.question_id.toString()));
+
+      // Find questions with no answer record
+      const unansweredQIds = allQIds.filter(qid => !answeredQIds.has(qid));
+
+      if (unansweredQIds.length > 0) {
+        // Insert empty Answer records to mark them as "attempted"
+        const emptyAnswers = unansweredQIds.map(qid => ({
+          student_id: studentId,
+          exam_id: examId,
+          question_id: new mongoose.Types.ObjectId(qid),
+          answer_text: ''
+        }));
+        await Answer.insertMany(emptyAnswers);
+        fixedCount += unansweredQIds.length;
+
+        // Get student info for response
+        const student = await Student.findById(studentId, 'name roll_number');
+        if (student) {
+          fixedStudents.push({
+            name: student.name,
+            roll_number: student.roll_number,
+            fixed_questions: unansweredQIds.length
+          });
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Fixed ${fixedCount} unanswered question records across ${fixedStudents.length} student(s).`,
+      fixed_students: fixedStudents
+    });
+  } catch (error) {
+    console.error('Fix incomplete submissions error:', error);
+    res.status(500).json({ success: false, message: 'Server error: ' + error.message });
+  }
+});
+
 module.exports = router;
