@@ -134,25 +134,41 @@ router.post('/students/upload', upload.single('file'), async (req, res) => {
     const errors = [];
 
     for (let i = 0; i < records.length; i++) {
-      const row = records[i];
-      // Support flexible column names
+      // Normalize row keys to lowercase, trimmed, and stripped of non-alphanumeric characters
+      const cleanRow = {};
+      Object.keys(row).forEach(key => {
+        if (key !== null && key !== undefined) {
+          const cleanKey = key.toString().toLowerCase().replace(/[^a-z0-9]/g, '');
+          cleanRow[cleanKey] = row[key];
+        }
+      });
+
       const rollNumber = String(
-        row['Register Number'] || row['RegisterNo'] || row['register_number'] ||
-        row['Roll Number'] || row['roll_number'] || row['RollNumber'] || row['Roll No'] || row['rollno'] || ''
+        cleanRow['registernumber'] || cleanRow['registerno'] ||
+        cleanRow['rollnumber'] || cleanRow['rollno'] || ''
       ).trim().toUpperCase();
 
       const name = String(
-        row['Name of the Student'] || row['Name of Student'] || row['student_name'] ||
-        row['Name'] || row['name'] || row['Student Name'] || ''
+        cleanRow['nameofthestudent'] || cleanRow['nameofstudent'] || cleanRow['studentname'] ||
+        cleanRow['name'] || ''
       ).trim();
       
-      let dobRaw = row['DATE OF BIRTH'] || row['date_of_birth'] || row['DOB'] || row['dob'] || row['Date of Birth'] || row['DateOfBirth'] || '';
+      let dobRaw = cleanRow['dateofbirth'] || cleanRow['dob'] || '';
       let dob = '';
       if (dobRaw instanceof Date) {
         const year = dobRaw.getFullYear();
         const month = String(dobRaw.getMonth() + 1).padStart(2, '0');
         const day = String(dobRaw.getDate()).padStart(2, '0');
         dob = `${year}-${month}-${day}`;
+      } else if (typeof dobRaw === 'number') {
+        // Excel serial date number conversion (base date: 1899-12-30)
+        const date = new Date((dobRaw - 25569) * 86400 * 1000);
+        if (!isNaN(date.getTime())) {
+          const year = date.getFullYear();
+          const month = String(date.getMonth() + 1).padStart(2, '0');
+          const day = String(date.getDate()).padStart(2, '0');
+          dob = `${year}-${month}-${day}`;
+        }
       } else {
         dob = String(dobRaw).trim();
       }
@@ -247,7 +263,7 @@ router.get('/students', async (req, res) => {
     const match = {};
 
     if (year) match.year = parseInt(year);
-    if (section) match.section = section.toUpperCase();
+    if (section) match.section = section.trim().toUpperCase();
 
     const students = await Student.aggregate([
       { $match: match },
