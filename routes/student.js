@@ -55,7 +55,8 @@ router.get('/exams', async (req, res) => {
           description: 1,
           duration_minutes: 1,
           created_at: 1,
-          question_count: { $size: '$questions' }
+          question_count: { $size: '$questions' },
+          question_ids: '$questions._id'
         }
       },
       { $sort: { created_at: -1 } }
@@ -64,11 +65,31 @@ router.get('/exams', async (req, res) => {
     const takenExams = await Result.find({ student_id: studentId }, 'exam_id');
     const takenExamIds = new Set(takenExams.map(r => r.exam_id.toString()));
 
-    const examsWithStatus = exams.map(exam => ({
-      ...exam,
-      id: exam._id.toString(),
-      already_taken: takenExamIds.has(exam._id.toString())
-    }));
+    // For already-taken exams, find how many questions have no answer yet (new questions added after submission)
+    const studentIdObj = new mongoose.Types.ObjectId(studentId);
+    const studentAnswers = await Answer.find({ student_id: studentIdObj }, 'exam_id question_id');
+    const answeredMap = {}; // examId -> Set of answered question IDs
+    for (const ans of studentAnswers) {
+      const eid = ans.exam_id.toString();
+      if (!answeredMap[eid]) answeredMap[eid] = new Set();
+      answeredMap[eid].add(ans.question_id.toString());
+    }
+
+    const examsWithStatus = exams.map(exam => {
+      const eid = exam._id.toString();
+      const alreadyTaken = takenExamIds.has(eid);
+      let newQuestionCount = 0;
+      if (alreadyTaken && exam.question_ids) {
+        const answered = answeredMap[eid] || new Set();
+        newQuestionCount = exam.question_ids.filter(qid => !answered.has(qid.toString())).length;
+      }
+      return {
+        ...exam,
+        id: eid,
+        already_taken: alreadyTaken,
+        new_question_count: newQuestionCount
+      };
+    });
 
     res.json({ success: true, exams: examsWithStatus });
   } catch (error) {
@@ -120,9 +141,8 @@ router.get('/exams/:id/start', async (req, res) => {
     }
 
     const existingResult = await Result.findOne({ student_id: studentId, exam_id: examId });
-    if (existingResult) return res.status(403).json({ success: false, message: 'You have already taken this exam' });
 
-    // Get questions WITHOUT correct_option (for MCQ) and with safe test_cases (for PROGRAM)
+    // Get all questions (without correct answers)
     const questionsRaw = await Question.find(
       { exam_id: examId },
       'id exam_id question_type question_text option_a option_b option_c option_d marks test_cases'
@@ -132,7 +152,7 @@ router.get('/exams/:id/start', async (req, res) => {
       return res.status(400).json({ success: false, message: 'This exam has no questions yet' });
     }
 
-    const questions = questionsRaw.map(q => ({
+    const mapQuestion = q => ({
       id: q._id.toString(),
       exam_id: q.exam_id.toString(),
       question_type: q.question_type,
@@ -144,25 +164,46 @@ router.get('/exams/:id/start', async (req, res) => {
       marks: q.marks,
       test_cases: q.test_cases ? q.test_cases.map(tc => {
         if (tc.is_public) {
-          return {
-            id: tc._id.toString(),
-            input: tc.input,
-            expected_output: tc.expected_output,
-            is_public: true
-          };
+          return { id: tc._id.toString(), input: tc.input, expected_output: tc.expected_output, is_public: true };
         }
-        return {
-          id: tc._id.toString(),
-          is_public: false
-        };
+        return { id: tc._id.toString(), is_public: false };
       }) : []
-    }));
+    });
 
+    // --- PARTIAL RETAKE: student already submitted but admin added new questions ---
+    if (existingResult) {
+      const studentAnswers = await Answer.find({ student_id: studentId, exam_id: examId }, 'question_id');
+      const answeredQIds = new Set(studentAnswers.map(a => a.question_id.toString()));
+      const unansweredRaw = questionsRaw.filter(q => !answeredQIds.has(q._id.toString()));
+
+      if (unansweredRaw.length === 0) {
+        return res.status(403).json({ success: false, message: 'You have already completed this exam and there are no new questions.' });
+      }
+
+      const unansweredQuestions = unansweredRaw.map(mapQuestion);
+      // No shuffle for partial retake — show new questions in order
+      return res.json({
+        success: true,
+        partial_retake: true,
+        new_question_count: unansweredQuestions.length,
+        exam: {
+          id: exam._id.toString(),
+          title: exam.title,
+          description: exam.description,
+          duration_minutes: Math.max(5, Math.round(exam.duration_minutes * unansweredQuestions.length / questionsRaw.length))
+        },
+        questions: unansweredQuestions
+      });
+    }
+
+    // --- NORMAL FIRST ATTEMPT ---
+    const questions = questionsRaw.map(mapQuestion);
     // Deterministically shuffle questions unique to each student
     const shuffledQuestions = seededShuffle(questions, studentId.toString() + examId.toString());
 
     res.json({
       success: true,
+      partial_retake: false,
       exam: {
         id: exam._id.toString(),
         title: exam.title,
@@ -191,9 +232,8 @@ router.post('/exams/:id/submit', async (req, res) => {
     if (!exam) return res.status(404).json({ success: false, message: 'Exam not found' });
 
     const existingResult = await Result.findOne({ student_id: studentId, exam_id: examId });
-    if (existingResult) return res.status(403).json({ success: false, message: 'You have already submitted this exam' });
 
-    const { answers, languages, tab_switches, auto_submitted } = req.body;
+    const { answers, tab_switches, auto_submitted } = req.body;
 
     if (!answers || typeof answers !== 'object') {
       return res.status(400).json({ success: false, message: 'Answers object is required' });
@@ -202,6 +242,59 @@ router.post('/exams/:id/submit', async (req, res) => {
     // Get all questions with correct answers
     const questions = await Question.find({ exam_id: examId });
 
+    // --- PARTIAL RETAKE: student already has a result, update it with new answers ---
+    if (existingResult) {
+      // Only accept answers for questions not already answered
+      const alreadyAnswered = await Answer.find({ student_id: studentId, exam_id: examId }, 'question_id');
+      const answeredQIds = new Set(alreadyAnswered.map(a => a.question_id.toString()));
+
+      let additionalScore = 0;
+      const newAnswersToInsert = [];
+
+      for (const question of questions) {
+        const qIdStr = question._id.toString();
+        if (answeredQIds.has(qIdStr)) continue; // skip already answered questions
+
+        const studentAnswer = answers[qIdStr] || '';
+        if (!studentAnswer) continue;
+
+        if (question.question_type === 'MCQ' && studentAnswer.toUpperCase() === question.correct_option) {
+          additionalScore += (question.marks || 1);
+        }
+
+        newAnswersToInsert.push({
+          student_id: studentId,
+          exam_id: examId,
+          question_id: question._id,
+          answer_text: typeof studentAnswer === 'string' ? studentAnswer : studentAnswer.toString()
+        });
+      }
+
+      if (newAnswersToInsert.length > 0) {
+        await Answer.insertMany(newAnswersToInsert);
+      }
+
+      // Update the existing result with new score
+      const newMcqTotal = questions.filter(q => q.question_type === 'MCQ').reduce((sum, q) => sum + (q.marks || 1), 0);
+      await Result.findByIdAndUpdate(existingResult._id, {
+        mcq_score: existingResult.mcq_score + additionalScore,
+        mcq_total: newMcqTotal,
+        submitted_at: new Date()
+      });
+
+      return res.json({
+        success: true,
+        message: 'New answers submitted successfully',
+        partial_retake: true,
+        evaluation: {
+          mcq_score: existingResult.mcq_score + additionalScore,
+          mcq_total: newMcqTotal,
+          tab_switches: existingResult.tab_switches
+        }
+      });
+    }
+
+    // --- NORMAL FIRST SUBMISSION ---
     let mcqScore = 0;
     let mcqTotal = 0;
 
@@ -255,9 +348,10 @@ router.post('/exams/:id/submit', async (req, res) => {
     });
   } catch (error) {
     console.error('Submit exam error:', error);
-    res.status(500).json({ success: false, message: 'Server error submitting exam' });
+    res.status(500).json({ success: false, message: error.message || 'Server error submitting exam' });
   }
 });
+
 
 // GET /api/student/results — Only show individual exam marks if released by admin
 router.get('/results', async (req, res) => {
