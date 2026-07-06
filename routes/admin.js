@@ -136,10 +136,17 @@ router.post('/students/upload', upload.single('file'), async (req, res) => {
     for (let i = 0; i < records.length; i++) {
       const row = records[i];
       // Support flexible column names
-      const rollNumber = String(row['Roll Number'] || row['roll_number'] || row['RollNumber'] || row['Roll No'] || row['rollno'] || '').trim().toUpperCase();
-      const name = String(row['Name'] || row['name'] || row['Student Name'] || '').trim();
+      const rollNumber = String(
+        row['Register Number'] || row['RegisterNo'] || row['register_number'] ||
+        row['Roll Number'] || row['roll_number'] || row['RollNumber'] || row['Roll No'] || row['rollno'] || ''
+      ).trim().toUpperCase();
+
+      const name = String(
+        row['Name of the Student'] || row['Name of Student'] || row['student_name'] ||
+        row['Name'] || row['name'] || row['Student Name'] || ''
+      ).trim();
       
-      let dobRaw = row['DOB'] || row['dob'] || row['Date of Birth'] || row['DateOfBirth'] || '';
+      let dobRaw = row['DATE OF BIRTH'] || row['date_of_birth'] || row['DOB'] || row['dob'] || row['Date of Birth'] || row['DateOfBirth'] || '';
       let dob = '';
       if (dobRaw instanceof Date) {
         const year = dobRaw.getFullYear();
@@ -464,6 +471,28 @@ router.put('/exams/:id/toggle', async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
+
+// POST /api/admin/exams/:id/reset — Reset exam results so all students can retake it
+router.post('/exams/:id/reset', async (req, res) => {
+  try {
+    const examId = req.params.id;
+    if (!mongoose.Types.ObjectId.isValid(examId)) {
+      return res.status(400).json({ success: false, message: 'Invalid exam ID' });
+    }
+    const exam = await Exam.findById(examId);
+    if (!exam) return res.status(404).json({ success: false, message: 'Exam not found' });
+
+    // Clear all results and answers for this exam
+    await Answer.deleteMany({ exam_id: examId });
+    await Result.deleteMany({ exam_id: examId });
+
+    res.json({ success: true, message: 'Exam results reset successfully! All students can now retake this exam.' });
+  } catch (error) {
+    console.error('Reset exam error:', error);
+    res.status(500).json({ success: false, message: 'Server error resetting exam' });
+  }
+});
+
 
 // ==================== QUESTIONS ====================
 
