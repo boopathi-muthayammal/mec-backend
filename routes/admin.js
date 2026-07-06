@@ -729,6 +729,73 @@ router.get('/results', async (req, res) => {
   }
 });
 
+// GET /api/admin/results/class-report — Detailed report of a class for an exam
+router.get('/results/class-report', async (req, res) => {
+  try {
+    const { exam_id, year, section } = req.query;
+    if (!exam_id || !year || !section) {
+      return res.status(400).json({ success: false, message: 'exam_id, year, and section are required parameters.' });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(exam_id)) {
+      return res.status(400).json({ success: false, message: 'Invalid exam ID.' });
+    }
+
+    const exam = await Exam.findById(exam_id);
+    if (!exam) {
+      return res.status(404).json({ success: false, message: 'Exam not found' });
+    }
+
+    // Find all students registered in this year and section
+    const students = await Student.find({
+      year: parseInt(year),
+      section: section.trim().toUpperCase()
+    }).sort({ roll_number: 1 });
+
+    // Find all results for this exam
+    const results = await Result.find({ exam_id });
+    const resultMap = new Map();
+    results.forEach(r => {
+      if (r.student_id) {
+        resultMap.set(r.student_id.toString(), r);
+      }
+    });
+
+    const report = students.map(student => {
+      const studentIdStr = student._id.toString();
+      const hasResult = resultMap.has(studentIdStr);
+      const result = resultMap.get(studentIdStr);
+
+      return {
+        student_id: studentIdStr,
+        roll_number: student.roll_number,
+        name: student.name,
+        attended: hasResult,
+        score_details: hasResult ? {
+          mcq_score: result.mcq_score,
+          mcq_total: result.mcq_total,
+          program_score: result.program_score || 0,
+          program_total: result.program_total || 0,
+          total_score: (result.mcq_score || 0) + (result.program_score || 0),
+          total_possible: (result.mcq_total || 0) + (result.program_total || 0)
+        } : null,
+        tab_switches: hasResult ? result.tab_switches : 0,
+        auto_submitted: hasResult ? result.auto_submitted : false,
+        submitted_at: hasResult ? result.submitted_at : null
+      };
+    });
+
+    res.json({
+      success: true,
+      exam_title: exam.title,
+      report
+    });
+  } catch (error) {
+    console.error('Class report error:', error);
+    res.status(500).json({ success: false, message: 'Server error generating class report' });
+  }
+});
+
 // GET /api/admin/exams/:id/answers/:studentId — View student's program answers
 router.get('/exams/:id/answers/:studentId', async (req, res) => {
   try {
