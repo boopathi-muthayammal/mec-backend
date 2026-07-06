@@ -87,7 +87,18 @@ router.post('/student-login', async (req, res) => {
 // Normalize DOB to YYYY-MM-DD format for comparison
 function normalizeDob(dob) {
   if (!dob) return '';
-  const cleaned = dob.trim();
+  
+  let cleaned = '';
+  if (dob instanceof Date) {
+    const year = dob.getFullYear();
+    const month = String(dob.getMonth() + 1).padStart(2, '0');
+    const day = String(dob.getDate()).padStart(2, '0');
+    cleaned = `${year}-${month}-${day}`;
+  } else {
+    cleaned = String(dob).trim();
+  }
+
+  if (!cleaned) return '';
   
   // If already YYYY-MM-DD
   if (/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) {
@@ -95,15 +106,23 @@ function normalizeDob(dob) {
   }
   
   // DD-MM-YYYY or DD/MM/YYYY
-  if (/^\d{2}[-\/]\d{2}[-\/]\d{4}$/.test(cleaned)) {
+  if (/^\d{1,2}[-\/]\d{1,2}[-\/]\d{4}$/.test(cleaned)) {
     const parts = cleaned.split(/[-\/]/);
-    return `${parts[2]}-${parts[1]}-${parts[0]}`;
+    return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
   }
 
   // MM/DD/YYYY (US format)
   if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(cleaned)) {
     const parts = cleaned.split('/');
     return `${parts[2]}-${parts[0].padStart(2,'0')}-${parts[1].padStart(2,'0')}`;
+  }
+
+  // Handle ISO string format (e.g. 2005-05-15T00:00:00.000Z)
+  if (cleaned.includes('T')) {
+    const datePart = cleaned.split('T')[0];
+    if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+      return datePart;
+    }
   }
 
   return cleaned;
