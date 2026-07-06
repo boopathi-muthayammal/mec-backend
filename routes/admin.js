@@ -685,6 +685,35 @@ function parseQuestionsFromText(text) {
     const line = lines[i];
     if (!line) continue;
 
+    // Try to match a complete single-line question with options (and optional answer)
+    // E.g. "1. Question Text A) OptionA B) OptionB C) OptionC D) OptionD Answer: B"
+    const singleLineMatch = line.match(/(.*?)\s*(?:\(|\[)?\s*[aA]\s*(?:\)|\.|\]|:|-)\s*(.*?)\s*(?:\(|\[)?\s*[bB]\s*(?:\)|\.|\]|:|-)\s*(.*?)\s*(?:\(|\[)?\s*[cC]\s*(?:\)|\.|\]|:|-)\s*(.*?)\s*(?:\(|\[)?\s*[dD]\s*(?:\)|\.|\]|:|-)\s*(.*?)(?:\s*(?:Answer|Ans|Correct Option|Correct Answer|Ans is|Answer is)\s*[\-\[\]\(\):\s]*([a-dE-eA-D]))?$/i);
+    if (singleLineMatch) {
+      let rawQText = singleLineMatch[1].trim();
+      // Strip question number from the start if present
+      const qNumMatch = rawQText.match(/^(?:Question|Q|q)?\s*[\-\s]*(\d+)[\.\):\-\]]\s*(.*)$/i);
+      if (qNumMatch) {
+        rawQText = qNumMatch[2].trim();
+      }
+
+      pushQuestion(currentQuestion);
+      currentQuestion = {
+        question_text: rawQText,
+        option_a: singleLineMatch[2].trim(),
+        option_b: singleLineMatch[3].trim(),
+        option_c: singleLineMatch[4].trim(),
+        option_d: singleLineMatch[5].trim(),
+        correct_option: (singleLineMatch[6] || 'A').toUpperCase().trim(),
+        question_type: 'MCQ',
+        marks: 1
+      };
+      
+      pushQuestion(currentQuestion);
+      currentQuestion = null;
+      lastLines = [];
+      continue;
+    }
+
     // Check if line starts a question (e.g. "1. What is..." or "Q1. What is..." or "Question 5: What is...")
     const qMatch = line.match(/^(?:Question|Q|q)?\s*[\-\s]*(\d+)[\.\):\-\]]\s*(.*)$/i);
     if (qMatch) {
