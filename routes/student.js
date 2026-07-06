@@ -256,17 +256,21 @@ router.post('/exams/:id/submit', async (req, res) => {
         if (answeredQIds.has(qIdStr)) continue; // skip already answered questions
 
         const studentAnswer = answers[qIdStr] || '';
-        if (!studentAnswer) continue;
 
-        if (question.question_type === 'MCQ' && studentAnswer.toUpperCase() === question.correct_option) {
+        // Calculate score only if answer was provided and is correct
+        if (studentAnswer && question.question_type === 'MCQ' && studentAnswer.toUpperCase() === question.correct_option) {
           additionalScore += (question.marks || 1);
         }
 
+        // ALWAYS insert an Answer record for every new question — even if unanswered (answer_text='').
+        // This marks the question as "attempted" so new_question_count becomes 0 on the dashboard.
+        // Without this, auto-submitted students (who answered 0 questions) kept seeing "Answer New Questions"
+        // because the Answer table had no records for these questions.
         newAnswersToInsert.push({
           student_id: studentId,
           exam_id: examId,
           question_id: question._id,
-          answer_text: typeof studentAnswer === 'string' ? studentAnswer : studentAnswer.toString()
+          answer_text: typeof studentAnswer === 'string' ? studentAnswer : (studentAnswer ? studentAnswer.toString() : '')
         });
       }
 
