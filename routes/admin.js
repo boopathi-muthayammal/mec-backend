@@ -5,6 +5,8 @@ const fs = require('fs');
 const mongoose = require('mongoose');
 const { parse } = require('csv-parse/sync');
 const { Admin, Student, Exam, Question, Answer, Result } = require('../database');
+const XLSX = require('xlsx');
+
 
 const router = express.Router();
 
@@ -81,22 +83,38 @@ router.post('/students/upload', upload.single('file'), async (req, res) => {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
     }
 
-    const fileContent = fs.readFileSync(req.file.path, 'utf-8');
-    
-    let records;
-    try {
-      records = parse(fileContent, {
-        columns: true,
-        skip_empty_lines: true,
-        trim: true,
-        bom: true
-      });
-    } catch (parseErr) {
-      return res.status(400).json({ success: false, message: 'Invalid CSV format. Please check your file.' });
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    let records = [];
+
+    if (ext === '.xlsx' || ext === '.xls') {
+      try {
+        const workbook = XLSX.readFile(req.file.path, { cellDates: true });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        records = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+      } catch (excelErr) {
+        if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        return res.status(400).json({ success: false, message: 'Invalid Excel file. Please check your file.' });
+      }
+    } else {
+      // Treat as CSV
+      try {
+        const fileContent = fs.readFileSync(req.file.path, 'utf-8');
+        records = parse(fileContent, {
+          columns: true,
+          skip_empty_lines: true,
+          trim: true,
+          bom: true
+        });
+      } catch (parseErr) {
+        if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        return res.status(400).json({ success: false, message: 'Invalid CSV format. Please check your file.' });
+      }
     }
 
     if (records.length === 0) {
-      return res.status(400).json({ success: false, message: 'CSV file is empty' });
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ success: false, message: 'Uploaded file is empty' });
     }
 
     const reqYear = parseInt(req.body.year || '0');
@@ -118,9 +136,19 @@ router.post('/students/upload', upload.single('file'), async (req, res) => {
     for (let i = 0; i < records.length; i++) {
       const row = records[i];
       // Support flexible column names
-      const rollNumber = (row['Roll Number'] || row['roll_number'] || row['RollNumber'] || row['Roll No'] || row['rollno'] || '').trim().toUpperCase();
-      const name = (row['Name'] || row['name'] || row['Student Name'] || '').trim();
-      const dob = (row['DOB'] || row['dob'] || row['Date of Birth'] || row['DateOfBirth'] || '').trim();
+      const rollNumber = String(row['Roll Number'] || row['roll_number'] || row['RollNumber'] || row['Roll No'] || row['rollno'] || '').trim().toUpperCase();
+      const name = String(row['Name'] || row['name'] || row['Student Name'] || '').trim();
+      
+      let dobRaw = row['DOB'] || row['dob'] || row['Date of Birth'] || row['DateOfBirth'] || '';
+      let dob = '';
+      if (dobRaw instanceof Date) {
+        const year = dobRaw.getFullYear();
+        const month = String(dobRaw.getMonth() + 1).padStart(2, '0');
+        const day = String(dobRaw.getDate()).padStart(2, '0');
+        dob = `${year}-${month}-${day}`;
+      } else {
+        dob = String(dobRaw).trim();
+      }
 
       if (!rollNumber || !name || !dob) {
         errors.push(`Row ${i + 2}: Missing required fields (Roll Number, Name, DOB)`);
