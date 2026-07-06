@@ -1044,6 +1044,49 @@ router.get('/results/class-report', async (req, res) => {
   }
 });
 
+// POST /api/admin/exams/:id/reset/:studentId — Reset a student's exam attempt (delete result & answers)
+router.post('/exams/:id/reset/:studentId', async (req, res) => {
+  try {
+    const examId = req.params.id;
+    const studentId = req.params.studentId;
+
+    if (!mongoose.Types.ObjectId.isValid(examId) || !mongoose.Types.ObjectId.isValid(studentId)) {
+      return res.status(400).json({ success: false, message: 'Invalid ID parameters' });
+    }
+
+    // Delete results
+    await Result.deleteOne({ exam_id: examId, student_id: studentId });
+    // Delete answers
+    await Answer.deleteMany({ exam_id: examId, student_id: studentId });
+
+    res.json({ success: true, message: 'Exam attempt reset successfully' });
+  } catch (error) {
+    console.error('Reset exam error:', error);
+    res.status(500).json({ success: false, message: 'Server error resetting exam attempt' });
+  }
+});
+
+// POST /api/admin/exams/:id/reset-all — Reset all student exam attempts for this exam
+router.post('/exams/:id/reset-all', async (req, res) => {
+  try {
+    const examId = req.params.id;
+
+    if (!mongoose.Types.ObjectId.isValid(examId)) {
+      return res.status(400).json({ success: false, message: 'Invalid exam ID' });
+    }
+
+    // Delete all results for this exam
+    await Result.deleteMany({ exam_id: examId });
+    // Delete all answers for this exam
+    await Answer.deleteMany({ exam_id: examId });
+
+    res.json({ success: true, message: 'All exam attempts reset successfully' });
+  } catch (error) {
+    console.error('Reset all exams error:', error);
+    res.status(500).json({ success: false, message: 'Server error resetting all exam attempts' });
+  }
+});
+
 // GET /api/admin/exams/:id/answers/:studentId — View student's program answers
 router.get('/exams/:id/answers/:studentId', async (req, res) => {
   try {
