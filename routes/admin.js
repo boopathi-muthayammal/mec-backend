@@ -809,6 +809,8 @@ router.post('/exams/:id/upload-questions', upload.single('file'), async (req, re
       });
     }
 
+    const defaultMarks = parseInt(req.body.default_marks || req.query.default_marks || '1') || 1;
+
     // Insert questions to DB in batch
     const questionsToInsert = parsedQuestions.map(q => ({
       exam_id: examId,
@@ -819,7 +821,7 @@ router.post('/exams/:id/upload-questions', upload.single('file'), async (req, re
       option_c: q.option_c,
       option_d: q.option_d,
       correct_option: q.correct_option,
-      marks: q.marks || 1
+      marks: q.marks || defaultMarks
     }));
 
     const insertedQuestions = await Question.insertMany(questionsToInsert);
