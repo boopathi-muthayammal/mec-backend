@@ -755,32 +755,35 @@ router.get('/results/class-report', async (req, res) => {
     // Find all results for this exam
     const results = await Result.find({ exam_id });
     
-    // Filter results to only include students in this year/section
-    const studentIdsInClass = new Set(students.map(s => s._id.toString()));
-    const classResults = results.filter(r => r.student_id && studentIdsInClass.has(r.student_id.toString()));
-
-    // Sort class results by score descending
-    const sortedResults = classResults.map(r => ({
-      student_id: r.student_id.toString(),
-      total_score: (r.mcq_score || 0) + (r.program_score || 0)
-    })).sort((a, b) => b.total_score - a.total_score);
-
-    // Assign competition ranks
-    const ranks = new Map();
-    let currentRank = 1;
-    for (let i = 0; i < sortedResults.length; i++) {
-      if (i > 0 && sortedResults[i].total_score < sortedResults[i - 1].total_score) {
-        currentRank = i + 1;
-      }
-      ranks.set(sortedResults[i].student_id, currentRank);
-    }
-
+    // Create de-duplicated map of results (keys are student_id string)
     const resultMap = new Map();
     results.forEach(r => {
       if (r.student_id) {
         resultMap.set(r.student_id.toString(), r);
       }
     });
+    
+    // Filter results to only include students in this year/section
+    const studentIdsInClass = new Set(students.map(s => s._id.toString()));
+
+    // Get de-duplicated results for this class and sort by score descending
+    const deDuplicatedClassResults = Array.from(resultMap.values())
+      .filter(r => r.student_id && studentIdsInClass.has(r.student_id.toString()))
+      .map(r => ({
+        student_id: r.student_id.toString(),
+        total_score: (r.mcq_score || 0) + (r.program_score || 0)
+      }))
+      .sort((a, b) => b.total_score - a.total_score);
+
+    // Assign competition ranks
+    const ranks = new Map();
+    let currentRank = 1;
+    for (let i = 0; i < deDuplicatedClassResults.length; i++) {
+      if (i > 0 && deDuplicatedClassResults[i].total_score < deDuplicatedClassResults[i - 1].total_score) {
+        currentRank = i + 1;
+      }
+      ranks.set(deDuplicatedClassResults[i].student_id, currentRank);
+    }
 
     const report = students.map(student => {
       const studentIdStr = student._id.toString();
