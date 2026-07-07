@@ -79,9 +79,9 @@ function parseDateToYYYYMMDD(rawDate) {
   if (rawDate === null || rawDate === undefined) return '';
   
   if (rawDate instanceof Date) {
-    const year = rawDate.getFullYear();
-    const month = String(rawDate.getMonth() + 1).padStart(2, '0');
-    const day = String(rawDate.getDate()).padStart(2, '0');
+    const year = rawDate.getUTCFullYear();
+    const month = String(rawDate.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(rawDate.getUTCDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
   }
 
