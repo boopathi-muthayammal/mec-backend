@@ -28,7 +28,13 @@ router.post('/admin-login', async (req, res) => {
     req.session.admin = { id: admin.id, username: admin.username };
     req.session.student = null;
 
-    res.json({ success: true, message: 'Login successful' });
+    req.session.save((err) => {
+      if (err) {
+        console.error('Session save error:', err);
+        return res.status(500).json({ success: false, message: 'Server error during login' });
+      }
+      res.json({ success: true, message: 'Login successful' });
+    });
   } catch (error) {
     console.error('Admin login error:', error);
     res.status(500).json({ success: false, message: 'Server error during login' });
@@ -68,15 +74,21 @@ router.post('/student-login', async (req, res) => {
     };
     req.session.admin = null;
 
-    res.json({
-      success: true,
-      message: 'Login successful',
-      student: {
-        name: student.name,
-        roll_number: student.roll_number,
-        year: student.year,
-        section: student.section
+    req.session.save((err) => {
+      if (err) {
+        console.error('Session save error:', err);
+        return res.status(500).json({ success: false, message: 'Server error during login' });
       }
+      res.json({
+        success: true,
+        message: 'Login successful',
+        student: {
+          name: student.name,
+          roll_number: student.roll_number,
+          year: student.year,
+          section: student.section
+        }
+      });
     });
   } catch (error) {
     console.error('Student login error:', error);
