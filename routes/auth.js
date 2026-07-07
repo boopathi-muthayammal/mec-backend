@@ -160,6 +160,7 @@ router.post('/logout', (req, res) => {
 // GET /api/auth/check-session
 router.get('/check-session', (req, res) => {
   try {
+    res.set('Cache-Control', 'no-store');
     if (req.session.admin) {
       return res.json({ success: true, role: 'admin', user: req.session.admin });
     }
