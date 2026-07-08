@@ -56,6 +56,10 @@ router.post('/student-login', async (req, res) => {
       return res.status(401).json({ success: false, message: 'Invalid Roll Number or Date of Birth' });
     }
 
+    if (student.is_blocked) {
+      return res.status(403).json({ success: false, message: 'Your account has been deactivated by the administrator.' });
+    }
+
     // Compare DOB (stored as YYYY-MM-DD or DD-MM-YYYY)
     // Normalize both to compare
     const inputDob = normalizeDob(dob);
@@ -158,13 +162,20 @@ router.post('/logout', (req, res) => {
 });
 
 // GET /api/auth/check-session
-router.get('/check-session', (req, res) => {
+router.get('/check-session', async (req, res) => {
   try {
     res.set('Cache-Control', 'no-store');
     if (req.session.admin) {
       return res.json({ success: true, role: 'admin', user: req.session.admin });
     }
     if (req.session.student) {
+      // Real-time check if student is blocked
+      const student = await Student.findById(req.session.student.id);
+      if (student && student.is_blocked) {
+        return req.session.destroy((err) => {
+          res.json({ success: true, role: 'none', user: null, blocked: true });
+        });
+      }
       return res.json({ success: true, role: 'student', user: req.session.student });
     }
     res.json({ success: true, role: 'none', user: null });

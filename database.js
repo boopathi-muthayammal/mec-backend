@@ -41,6 +41,7 @@ const studentSchema = new mongoose.Schema({
   dob: { type: String, required: false },
   year: { type: Number, required: true },
   section: { type: String, required: true },
+  is_blocked: { type: Boolean, default: false },
   created_at: { type: Date, default: Date.now }
 }, schemaOptions);
 

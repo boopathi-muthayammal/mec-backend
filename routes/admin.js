@@ -338,6 +338,7 @@ router.get('/students', async (req, res) => {
           dob: 1,
           year: 1,
           section: 1,
+          is_blocked: 1,
           created_at: 1,
           exams_taken: { $size: '$results' },
           average_score: {
@@ -411,6 +412,26 @@ router.delete('/students/:id', async (req, res) => {
   } catch (error) {
     console.error('Delete student error:', error);
     res.status(500).json({ success: false, message: 'Server error deleting student' });
+  }
+});
+
+// POST /api/admin/students/:id/toggle-block
+router.post('/students/:id/toggle-block', async (req, res) => {
+  try {
+    const id = req.params.id;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid student ID' });
+    }
+    const student = await Student.findById(id);
+    if (!student) {
+      return res.status(404).json({ success: false, message: 'Student not found' });
+    }
+    student.is_blocked = !student.is_blocked;
+    await student.save();
+    res.json({ success: true, message: `Student account ${student.is_blocked ? 'deactivated' : 'activated'}`, is_blocked: student.is_blocked });
+  } catch (error) {
+    console.error('Toggle block error:', error);
+    res.status(500).json({ success: false, message: 'Server error toggling block status' });
   }
 });
 
