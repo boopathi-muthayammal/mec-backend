@@ -171,10 +171,15 @@ router.get('/check-session', async (req, res) => {
     if (req.session.student) {
       // Real-time check if student is blocked
       const student = await Student.findById(req.session.student.id);
-      if (student && student.is_blocked) {
-        return req.session.destroy((err) => {
-          res.json({ success: true, role: 'none', user: null, blocked: true });
-        });
+      if (student) {
+        if (student.is_blocked) {
+          return req.session.destroy((err) => {
+            res.json({ success: true, role: 'none', user: null, blocked: true });
+          });
+        }
+        // Update ping for live tracking
+        student.last_ping = new Date();
+        await student.save();
       }
       return res.json({ success: true, role: 'student', user: req.session.student });
     }

@@ -372,6 +372,12 @@ router.post('/exams/:id/submit', async (req, res) => {
       { upsert: true, new: true }
     );
 
+    // Clear the active session for live tracking
+    await Student.findByIdAndUpdate(studentId, {
+      active_exam_id: null,
+      last_ping: null
+    });
+
     res.json({
       success: true,
       message: 'Exam submitted successfully',

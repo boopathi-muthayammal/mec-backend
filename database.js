@@ -42,6 +42,8 @@ const studentSchema = new mongoose.Schema({
   year: { type: Number, required: true },
   section: { type: String, required: true },
   is_blocked: { type: Boolean, default: false },
+  active_exam_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Exam', default: null },
+  last_ping: { type: Date, default: null },
   created_at: { type: Date, default: Date.now }
 }, schemaOptions);
 

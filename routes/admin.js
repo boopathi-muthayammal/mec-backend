@@ -1036,11 +1036,22 @@ router.get('/results/class-report', async (req, res) => {
       const result = resultMap.get(studentIdStr);
       const rank = hasResult ? ranks.get(studentIdStr) : null;
 
+      let exam_status = 'Not Started';
+      if (hasResult) {
+        exam_status = 'Completed';
+      } else if (student.active_exam_id && student.active_exam_id.toString() === exam_id) {
+        const timeSincePing = student.last_ping ? (new Date() - new Date(student.last_ping)) : Infinity;
+        if (timeSincePing <= 150000) { // 2.5 minutes
+          exam_status = 'In Progress';
+        }
+      }
+
       return {
         student_id: studentIdStr,
         roll_number: student.roll_number,
         name: student.name,
         attended: hasResult,
+        exam_status: exam_status,
         rank: rank,
         score_details: hasResult ? {
           mcq_score: result.mcq_score,
