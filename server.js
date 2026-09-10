@@ -2,95 +2,59 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const session = require('express-session');
-const path = require('path');
-
-const fs = require('fs');
-
-const { initDatabase } = require('./database');
+const connectDB = require('./database');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
-// Trust first proxy (needed for secure cookies behind reverse proxies like Render/Vercel)
-app.set('trust proxy', 1);
+// Connect to MongoDB
+connectDB();
 
 // Middleware
 app.use(cors({
-  origin: process.env.CLIENT_URL,
+  origin: ['http://localhost:5173', 'http://localhost:3000'],
   credentials: true
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-const MongoStore = require('connect-mongo').default;
-
-const isProd = process.env.NODE_ENV === 'production';
-
+// Session
 app.use(session({
-  secret: 'exam-portal-secret-key-2024',
+  secret: process.env.SESSION_SECRET || 'attainment_secret',
   resave: false,
   saveUninitialized: false,
-  store: MongoStore.create({
-    mongoUrl: process.env.MONGODB_URI,
-    collectionName: 'sessions',
-    autoRemove: 'native',
-    ttl: 24 * 60 * 60 // 1 day
-  }),
   cookie: {
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    secure: false,
     httpOnly: true,
-    sameSite: isProd ? 'none' : 'lax',
-    secure: isProd
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
   }
 }));
 
-// Serve static files from 'public' directory and fallback to 'frontend/dist' (local dev setup)
-app.use(express.static(path.join(__dirname, 'public')));
-app.use(express.static(path.join(__dirname, '..', 'frontend', 'dist')));
+// Routes
+app.use('/api/auth', require('./routes/auth'));
+app.use('/api/admin', require('./routes/admin'));
+app.use('/api/hod', require('./routes/hod'));
+app.use('/api/faculty', require('./routes/faculty'));
+app.use('/api/student', require('./routes/student'));
+app.use('/api/marks', require('./routes/marksNew'));
 
-// Start server after database is initialized
-async function start() {
-  await initDatabase();
-  console.log('Database initialized successfully');
 
-  // Mount API routes
-  const authRoutes = require('./routes/auth');
-  const adminRoutes = require('./routes/admin');
-  const studentRoutes = require('./routes/student');
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'OK', message: 'Attainment Management System Running' });
+});
 
-  app.use('/api/auth', authRoutes);
-  app.use('/api/admin', adminRoutes);
-  app.use('/api/student', studentRoutes);
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ message: 'Route not found' });
+});
 
-  // Helper to get active SPA entry path
-  const getIndexHtmlPath = () => {
-    const frontendDist = path.join(__dirname, '..', 'frontend', 'dist', 'index.html');
-    if (fs.existsSync(frontendDist)) {
-      return frontendDist;
-    }
-    return path.join(__dirname, 'public', 'index.html');
-  };
+// Error handler
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ message: 'Internal Server Error', error: err.message });
+});
 
-  // Root route serves index.html
-  app.get('/', (req, res) => {
-    res.sendFile(getIndexHtmlPath());
-  });
-
-  // Catch-all: serve index.html for any unmatched routes (SPA support)
-  app.get('*', (req, res) => {
-    if (!req.path.startsWith('/api')) {
-      res.sendFile(getIndexHtmlPath());
-    } else {
-      res.status(404).json({ success: false, message: 'API endpoint not found' });
-    }
-  });
-
-  app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
-}
-
-start().catch(err => {
-  console.error('Failed to start server:', err);
-  process.exit(1);
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`🚀 Attainment Server running on http://localhost:${PORT}`);
 });
