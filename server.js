@@ -14,8 +14,8 @@ app.use(cors({
   origin: ['http://localhost:5173', 'http://localhost:3000'],
   credentials: true
 }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '20mb' }));
+app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 
 // Session
 app.use(session({
@@ -43,9 +43,20 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', message: 'Attainment Management System Running' });
 });
 
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({ message: 'Route not found' });
+const path = require('path');
+
+// Serve static frontend files from public directory
+app.use(express.static(path.join(__dirname, 'public')));
+
+// SPA fallback to index.html for non-API routes
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api')) return next();
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// 404 handler for API routes
+app.use('/api', (req, res) => {
+  res.status(404).json({ message: 'API Route not found' });
 });
 
 // Error handler

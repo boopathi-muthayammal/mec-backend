@@ -16,6 +16,8 @@ const userSchema = new mongoose.Schema({
   semester: { type: Number },
   batch: { type: String }, // e.g., "2022-2026"
   section: { type: String },
+  excludedSemesters: { type: [Number], default: [] },
+  enrolledSemesters: { type: [Number], default: [1, 2, 3, 4, 5, 6, 7, 8] },
   isActive: { type: Boolean, default: true }
 }, { timestamps: true });
 

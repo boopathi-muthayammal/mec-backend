@@ -20,6 +20,20 @@ const assessmentWeightSchema = new mongoose.Schema({
   weightage: { type: Number, required: true } // percentage contribution
 });
 
+const gradeRangeSchema = new mongoose.Schema({
+  grade: { type: String, required: true },
+  description: { type: String, default: '' },
+  minMark: { type: Number, required: true },
+  maxMark: { type: Number, required: true },
+  gradePoint: { type: Number, default: 0 }
+}, { _id: false });
+
+const gradingSystemSchema = new mongoose.Schema({
+  systemKey: { type: String, default: 'anna_univ_r2021' },
+  systemName: { type: String, default: 'Anna University R2021 (10-Point Letter Grade)' },
+  grades: [gradeRangeSchema]
+}, { _id: false });
+
 const courseSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true },
   code: { type: String, required: true, uppercase: true, trim: true },
@@ -39,6 +53,24 @@ const courseSchema = new mongoose.Schema({
   totalPSOs: { type: Number, default: 2 },
   cos: [coSchema],
   assessmentWeights: [assessmentWeightSchema],
+  gradingSystem: {
+    type: gradingSystemSchema,
+    default: () => ({
+      systemKey: 'anna_univ_r2021',
+      systemName: 'Anna University R2021 (10-Point Letter Grade)',
+      grades: [
+        { grade: 'O', description: 'Outstanding', minMark: 91, maxMark: 100, gradePoint: 10 },
+        { grade: 'A+', description: 'Excellent', minMark: 81, maxMark: 90, gradePoint: 9 },
+        { grade: 'A', description: 'Very Good', minMark: 71, maxMark: 80, gradePoint: 8 },
+        { grade: 'B+', description: 'Good', minMark: 61, maxMark: 70, gradePoint: 7 },
+        { grade: 'B', description: 'Average', minMark: 50, maxMark: 60, gradePoint: 6 },
+        { grade: 'C', description: 'Pass', minMark: 45, maxMark: 49, gradePoint: 5 },
+        { grade: 'U', description: 'Re-Appear / Fail', minMark: 0, maxMark: 44, gradePoint: 0 },
+        { grade: 'AB', description: 'Absent', minMark: 0, maxMark: 0, gradePoint: 0 }
+      ]
+    })
+  },
+  regulation: { type: mongoose.Schema.Types.ObjectId, ref: 'AttainmentTemplate' },
   isActive: { type: Boolean, default: true }
 }, { timestamps: true });
 

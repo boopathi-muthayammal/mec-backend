@@ -4,6 +4,8 @@ const Course = require('../models/Course');
 const COMapping = require('../models/COMapping');
 const Marks = require('../models/Marks');
 const Attainment = require('../models/Attainment');
+const AttainmentTemplate = require('../models/AttainmentTemplate');
+const Batch = require('../models/Batch');
 const User = require('../models/User');
 const ExcelJS = require('exceljs');
 const PDFDocument = require('pdfkit');
@@ -14,9 +16,15 @@ const facultyOnly = requireAuth(['faculty', 'admin']);
 // ============ MY COURSES ============
 router.get('/courses', facultyOnly, async (req, res) => {
   try {
-    const courses = await Course.find({ faculty: req.session.userId, isActive: true })
+    const filter = { isActive: true };
+    if (req.session.role === 'faculty') {
+      filter.faculty = req.session.userId;
+    }
+    const courses = await Course.find(filter)
       .populate('department', 'name code')
-      .sort({ semester: 1 });
+      .populate('faculty', 'name email')
+      .populate('regulation', 'name code')
+      .sort({ batch: -1, semester: 1 });
     res.json(courses);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -89,13 +97,16 @@ router.get('/courses/:id/students', facultyOnly, async (req, res) => {
   try {
     const course = await Course.findById(req.params.id);
     if (!course) return res.status(404).json({ message: 'Course not found' });
-    const students = await User.find({
+    const query = {
       role: 'student',
       department: course.department,
-      semester: course.semester,
       batch: course.batch,
       isActive: true
-    }).select('name rollNumber email section').sort({ rollNumber: 1 });
+    };
+    if (course.semester) {
+      query.excludedSemesters = { $ne: Number(course.semester) };
+    }
+    const students = await User.find(query).select('name rollNumber email section excludedSemesters').sort({ rollNumber: 1 });
     res.json(students);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -178,21 +189,42 @@ router.post('/courses/:id/calculate', facultyOnly, async (req, res) => {
       return res.status(400).json({ message: 'Please define COs first' });
     }
 
-    const threshold = req.body.threshold || 60;
+    // Find regulation template from course or batch
+    let regulation = null;
+    if (course.regulation) {
+      regulation = await AttainmentTemplate.findById(course.regulation);
+    }
+    if (!regulation && course.batch) {
+      const batchDoc = await Batch.findOne({ name: course.batch, department: course.department }).populate('regulation');
+      regulation = batchDoc?.regulation;
+    }
+    if (!regulation) {
+      regulation = await AttainmentTemplate.findOne({ isDefault: true });
+    }
+
+    const directRatio = (regulation?.directWeight ?? 80) / 100;
+    const indirectRatio = (regulation?.indirectWeight ?? 20) / 100;
+    const threshold = req.body.threshold || regulation?.thresholdScorePercent || 60;
+    const l3 = regulation?.level3Threshold ?? 80;
+    const l2 = regulation?.level2Threshold ?? 70;
+    const l1 = regulation?.level1Threshold ?? 60;
     const indirectDefault = req.body.indirectAttainment || 70;
 
-    // Get all students for this course
-    const students = await User.find({
+    // Get all students for this course (matched by batch & department, excluding students dropped from this sem)
+    const studentQuery = {
       role: 'student',
       department: course.department,
-      semester: course.semester,
       batch: course.batch,
       isActive: true
-    });
+    };
+    if (course.semester) {
+      studentQuery.excludedSemesters = { $ne: Number(course.semester) };
+    }
+    const students = await User.find(studentQuery);
     const totalStudents = students.length;
 
     if (totalStudents === 0) {
-      return res.status(400).json({ message: 'No students found for this course' });
+      return res.status(400).json({ message: 'No students found for this batch/course' });
     }
 
     // Get assessment weights
@@ -244,13 +276,14 @@ router.post('/courses/:id/calculate', facultyOnly, async (req, res) => {
       const directAttainment = studentScores.length > 0
         ? (attainedCount / studentScores.length) * 100 : 0;
 
-      // Attainment level: 0-3
+      // Attainment level: 0-3 according to Regulation thresholds
       let attainmentLevel = 0;
-      if (directAttainment >= 80) attainmentLevel = 3;
-      else if (directAttainment >= 70) attainmentLevel = 2;
-      else if (directAttainment >= 60) attainmentLevel = 1;
+      if (directAttainment >= l3) attainmentLevel = 3;
+      else if (directAttainment >= l2) attainmentLevel = 2;
+      else if (directAttainment >= l1) attainmentLevel = 1;
 
-      const finalAttainment = (directAttainment * 0.8) + (indirectDefault * 0.2);
+      // Formula according to Regulation (e.g. 80% direct + 20% indirect, or custom template)
+      const finalAttainment = (directAttainment * directRatio) + (indirectDefault * indirectRatio);
 
       coAttainments.push({
         co: coKey,

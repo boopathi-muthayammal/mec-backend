@@ -26,6 +26,7 @@ const ciaMarkSchema = new mongoose.Schema({
   student: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   course: { type: mongoose.Schema.Types.ObjectId, ref: 'Course', required: true },
   ciaNo: { type: Number, required: true, enum: [1, 2, 3] }, // CIA1, CIA2, CIA3(Model)
+  questions: [questionMarkSchema],
   coWiseMarks: [{
     co: { type: String },
     marksObtained: { type: Number, default: 0 },
@@ -58,10 +59,12 @@ const internalMarkSchema = new mongoose.Schema({
 internalMarkSchema.index({ student: 1, course: 1 }, { unique: true });
 
 
-// End Semester Exam (University Exam) — CO-wise
+// End Semester Exam (University Exam) — CO-wise & Question-wise with Grade
 const endSemMarkSchema = new mongoose.Schema({
   student: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   course: { type: mongoose.Schema.Types.ObjectId, ref: 'Course', required: true },
+  grade: { type: String, uppercase: true, trim: true },
+  questions: [questionMarkSchema],
   coWiseMarks: [{
     co: { type: String },
     marksObtained: { type: Number, default: 0 },
